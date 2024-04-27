@@ -1,0 +1,8 @@
+[package]
+name = "serial_monitor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+egui = "0.27.2"
+serialport = "4.3.0"
