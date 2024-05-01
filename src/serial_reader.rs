@@ -26,16 +26,58 @@ impl Display for SerialError {
     }
 }
 
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum Parity {
     None,
     Odd,
     Even,
 }
 
+impl Display for Parity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum FlowCtrl {
+    None,
+    Software,
+    Hardware,
+}
+
+impl Display for FlowCtrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(PartialEq, Clone, Debug)]
 pub enum StartMode {
     Immediate,
     Delay(Duration),
     Message(String),
+}
+
+impl Display for StartMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Immediate => write!(f, "Immediate"),
+            Self::Delay(delay) => match *delay == Duration::ZERO {
+                true => write!(f, "Delay"),
+                false => write!(f, "{:?}", self)
+            }
+            Self::Message(msg) => match msg.is_empty() {
+                true => write!(f, "Message"),
+                false => write!(f, "{:?}", self)
+            }
+        }
+    }
+}
+
+pub struct Line {
+    pub t: f64,
+    pub content: String,
 }
 
 pub struct SerialConfig {
@@ -44,13 +86,14 @@ pub struct SerialConfig {
     pub data_bits: u8,
     pub parity: Parity,
     pub stop_bits: u8,
+    pub flow_ctrl: FlowCtrl,
     pub timeout: Duration,
 }
 
 pub struct SerialReader {
     config: SerialConfig,
     port: Option<Box<dyn serialport::SerialPort>>,
-    lines: Arc<Mutex<VecDeque<Result<String, SerialError>>>>,
+    lines: Arc<Mutex<VecDeque<Result<Line, SerialError>>>>,
     worker_thread: Option<JoinHandle<()>>,
     stop: Arc<AtomicBool>,
 }
@@ -86,15 +129,22 @@ impl SerialReader {
                 Parity::None => serialport::Parity::None,
             })
             .stop_bits(match config.stop_bits {
-                0 => serialport::StopBits::One,
-                1 => serialport::StopBits::Two,
+                1 => serialport::StopBits::One,
+                2 => serialport::StopBits::Two,
                 _ => return Err(SerialError::UnsupportedStopBits(config.stop_bits)),
             })
-            .flow_control(serialport::FlowControl::None)
+            .flow_control(match config.flow_ctrl {
+                FlowCtrl::None => serialport::FlowControl::None,
+                FlowCtrl::Software => serialport::FlowControl::Software,
+                FlowCtrl::Hardware => serialport::FlowControl::Hardware
+            })
             .timeout(config.timeout);
 
-        let mut p = port.open().map_err(|e| SerialError::OpenError(e.to_string()))?;
-        p.write_data_terminal_ready(dtr).map_err(|_| SerialError::WriteDtrError)?;
+        let mut p = port
+            .open()
+            .map_err(|e| SerialError::OpenError(e.to_string()))?;
+        p.write_data_terminal_ready(dtr)
+            .map_err(|_| SerialError::WriteDtrError)?;
         self.port = Some(p);
         Ok(())
     }
@@ -124,10 +174,11 @@ impl SerialReader {
                 line_buf.clear();
                 let res = reader.read_line(&mut line_buf);
                 let line = line_buf.trim();
+                let t = start_time.elapsed();
 
                 started |= match start_mode {
                     StartMode::Immediate => true,
-                    StartMode::Delay(delay) => start_time.elapsed() >= delay,
+                    StartMode::Delay(delay) => t >= delay,
                     StartMode::Message(ref msg) => line == msg,
                 };
                 if !started {
@@ -136,7 +187,10 @@ impl SerialReader {
 
                 match res {
                     Ok(0) => break,
-                    Ok(_) => lines.lock().unwrap().push_back(Ok(line.to_string())),
+                    Ok(_) => lines.lock().unwrap().push_back(Ok(Line {
+                        t: t.as_secs_f64(),
+                        content: line.to_owned(),
+                    })),
                     Err(e) => {
                         if let Ok(mut locked_lines) = lines.lock() {
                             locked_lines.push_back(Err(SerialError::ReadError(e.to_string())));
@@ -158,7 +212,7 @@ impl SerialReader {
         }
     }
 
-    pub fn get_line(&mut self) -> Option<Result<String, SerialError>> {
+    pub fn get_line(&mut self) -> Option<Result<Line, SerialError>> {
         if let Ok(mut lines) = self.lines.lock() {
             return lines.pop_front();
         }
