@@ -1,7 +1,10 @@
-use crate::{app::SerialMonitorApp, serial_reader::{FlowCtrl, Parity, StartMode}};
+use crate::app::SerialMonitorApp;
+use crate::serial_reader::{FlowCtrl, Parity, StartMode};
 use eframe::egui;
+use egui::{Align2, Color32};
 use egui_plot::{Corner, Legend, Line, PlotPoints};
-use std::{fmt::Display, time::Duration};
+use std::fmt::Display;
+use std::time::{Duration, Instant};
 
 const SIDEPANEL_WIDTH: f32 = 225.0;
 const DROPDOWN_WIDTH: f32 = 150.0;
@@ -11,26 +14,50 @@ const BAUD_RATES: &[u32] = &[
     300, 600, 750, 1200, 2400, 4800, 9600, 19200, 31250, 38400, 57600, 74880, 115200, 230400,
     250000, 460800, 500000, 921600, 1000000, 2000000,
 ];
-const DATA_BITS: &[u32] = &[5, 6, 7, 8, 9];
+const DATA_BITS: &[u8] = &[5, 6, 7, 8, 9];
 const PARITIES: &[Parity] = &[Parity::None, Parity::Odd, Parity::Even];
-const STOP_BITS: &[u32] = &[1, 2];
+const STOP_BITS: &[u8] = &[1, 2];
 const FLOW_CTRLS: &[FlowCtrl] = &[FlowCtrl::None, FlowCtrl::Software, FlowCtrl::Hardware];
-const START_MODES: &[StartMode] = &[StartMode::Immediate, StartMode::Delay(Duration::ZERO), StartMode::Message(String::new())];
+const START_MODES: &[StartMode] = &[
+    StartMode::Immediate,
+    StartMode::Delay(Duration::ZERO),
+    StartMode::Message(String::new()),
+];
+
+struct Notification {
+    pub start: Instant,
+    pub duration: Duration,
+    pub text: String
+}
+
+impl Notification {
+    pub fn new(text: &str, duration: Duration) -> Self {
+        Self {
+            start: Instant::now(),
+            duration: duration,
+            text: text.to_owned()
+        }
+    }
+}
 
 pub struct SerialMonitorUI {
-    app: SerialMonitorApp
+    notification: Option<Notification>
 }
 
 impl SerialMonitorUI {
-    pub fn new(app: SerialMonitorApp, context: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(_context: &eframe::CreationContext<'_>) -> Self {
         Self {
-            app
+            notification: None
         }
     }
-    
-    fn config_panel(&mut self, ctx: &egui::Context) {
-        let config = self.app.conn_config();
 
+    pub fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame, app: &mut SerialMonitorApp) {
+        self.config_panel(ctx, app);
+        self.data_panel(ctx);
+        self.notification(ctx);
+    }
+
+    fn config_panel(&mut self, ctx: &egui::Context, app: &mut SerialMonitorApp) {
         egui::SidePanel::left("ConfigPanel")
             .exact_width(SIDEPANEL_WIDTH)
             .min_width(SIDEPANEL_WIDTH)
@@ -43,19 +70,39 @@ impl SerialMonitorUI {
                     ui.horizontal(|ui| {
                         let pos = egui::pos2(
                             ui.next_widget_position().x + STATUS_RADIUS * 1.25,
-                            ui.available_height() + STATUS_RADIUS,
+                            ui.available_height() + STATUS_RADIUS * 0.85,
                         );
-                        let col = egui::Color32::DARK_RED;
+                        let col = match app.is_connected() {
+                            true => egui::Color32::DARK_GREEN,
+                            false => egui::Color32::DARK_RED
+                        };
                         ui.painter().circle_filled(pos, STATUS_RADIUS, col);
                         ui.add_space(STATUS_RADIUS * 3.0);
                         ui.heading("Connection");
                         ui.add_space(10.0);
-                        ui.add(egui::Button::new("Connect").min_size(egui::Vec2::new(86.0, 0.0)));
+                        let connect_btn_text = match app.is_connected() {
+                            true => "Disconnect",
+                            false => "Connect"
+                        };
+                        let connect_resp = ui.add_enabled(
+                            app.can_connect(),
+                            egui::Button::new(connect_btn_text).min_size(egui::Vec2::new(86.0, 0.0)));
+                        if connect_resp.clicked() {
+                            if !app.is_connected() {
+                                if let Err(e) = app.connect_current() {
+                                    self.notification = Some(Notification::new(format!("Could not connect! ({})", e.to_string()).as_str(), Duration::from_secs(5)));
+                                }
+                            } else {
+                                app.disconnect_current();
+                            }
+                        }
                     });
                     ui.separator();
-    
-                    static DEVICES: &[&'static str; 2] = &["COM1", "COM3"];
-                    option_dropdown(ui, "Device", DEVICES, &mut config.port.as_str(), 20.0);
+
+                    ui.set_enabled(!app.is_connected());
+                    let devices = app.available_devices();
+                    let config = app.conn_config();
+                    option_dropdown(ui, "Device", devices.as_slice(), &mut config.port, 20.0);
                     option_dropdown(ui, "Baud", BAUD_RATES, &mut config.baud_rate, 27.0);
                     ui.separator();
 
@@ -73,8 +120,7 @@ impl SerialMonitorUI {
                             ui.add_space(0.0);
                             ui.add(egui::DragValue::new(&mut config.start_delay).clamp_range(0..=100000).max_decimals(0));
                         });
-                    }
-                    else if matches!(config.start_mode, StartMode::Message(_)) {
+                    } else if matches!(config.start_mode, StartMode::Message(_)) {
                         ui.horizontal(|ui| {
                             ui.label("Message");
                             ui.add_space(7.0);
@@ -95,7 +141,7 @@ impl SerialMonitorUI {
                     ui.add_space(ui.available_width());
                 });
             });
-    
+
             let frame = egui::Frame::window(&ctx.style());
             frame.show(ui, |ui| {
                 let graph: Vec<[f64; 2]> = vec![[0.0, 0.66], [0.33, 0.33], [0.66, 0.5], [1.0, 0.9]];
@@ -115,12 +161,28 @@ impl SerialMonitorUI {
             });
         });
     }
-}
 
-impl eframe::App for SerialMonitorUI {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.config_panel(ctx);
-        self.data_panel(ctx);
+    fn notification(&mut self, ctx: &egui::Context) {
+        if let Some(notification) = &self.notification {
+            if notification.start.elapsed() > notification.duration {
+                self.notification = None;
+                return;
+            }
+
+            let frame = egui::Frame::popup(&ctx.style()).fill(Color32::from_rgb(105, 25, 19));
+            egui::Window::new("")
+                .fixed_pos([ctx.available_rect().center().x, 75.0])
+                .collapsible(false)
+                .movable(false)
+                .resizable(false)
+                .frame(frame)
+                .title_bar(false)
+                .pivot(Align2::CENTER_CENTER)
+                .default_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.heading(notification.text.as_str());
+                });
+        }
     }
 }
 

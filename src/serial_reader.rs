@@ -110,7 +110,7 @@ impl SerialReader {
     }
 
     pub fn open(&mut self, dtr: bool) -> Result<(), SerialError> {
-        if self.port.is_some() || self.worker_thread.is_some() {
+        if self.is_open() {
             return Err(SerialError::AlreadyOpen);
         }
 
@@ -217,6 +217,10 @@ impl SerialReader {
             return lines.pop_front();
         }
         None
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.port.is_some() || self.worker_thread.is_some()
     }
 }
 
