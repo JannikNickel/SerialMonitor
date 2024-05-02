@@ -1,4 +1,4 @@
-use crate::data::{ConnectionConfig, SerialMonitorData};
+use crate::data::{ConnectionConfig, PlotConfig, SerialMonitorData};
 use crate::serial_reader::{SerialConfig, SerialError, SerialReader, StartMode};
 use crate::ui::SerialMonitorUI;
 
@@ -51,6 +51,10 @@ impl SerialMonitorApp {
 
     pub fn conn_config(&mut self) -> &mut ConnectionConfig {
         &mut self.data.conn_config
+    }
+
+    pub fn plot_config(&mut self) -> &mut PlotConfig {
+        &mut self.data.plot_config
     }
 
     pub fn available_devices(&self) -> Vec<String> {

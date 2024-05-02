@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{fmt::Display, time::Duration};
 
 use crate::serial_reader::{FlowCtrl, Parity, SerialConfig, StartMode};
 
@@ -61,7 +61,34 @@ impl ConnectionConfig {
     pub const NO_PORT: &'static str = "-";
 }
 
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum PlotMode {
+    Continous,
+    Redraw
+}
+
+impl Display for PlotMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+pub struct PlotConfig {
+    pub mode: PlotMode,
+    pub window: f32
+}
+
+impl Default for PlotConfig {
+    fn default() -> Self {
+        Self { 
+            mode: PlotMode::Continous,
+            window: 30.0
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct SerialMonitorData {
-    pub conn_config: ConnectionConfig
+    pub conn_config: ConnectionConfig,
+    pub plot_config: PlotConfig,
 }
