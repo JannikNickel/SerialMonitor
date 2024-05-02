@@ -1,21 +1,17 @@
-mod serial_reader;
+#![allow(dead_code)]
+
 mod app;
+mod data;
+mod serial_reader;
+mod ui;
 
-use app::SerialReaderApp;
-
-const WIN_WIDTH: f32 = 1280.0;
-const WIN_HEIGHT: f32 = 720.0;
+use app::SerialMonitorApp;
+use data::SerialMonitorData;
 
 fn main() {
-    let native_opts = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size(egui::Vec2::new(WIN_WIDTH, WIN_HEIGHT))
-            .with_min_inner_size(egui::Vec2::new(WIN_WIDTH, WIN_HEIGHT)
-        ),
-        ..Default::default()
-    };
-    let _ = eframe::run_native(
-        "SerialMonitor",
-        native_opts,
-        Box::new(|ctx| Box::new(SerialReaderApp::new(ctx))));
+    let data = SerialMonitorData::default();
+    if let Err(e) = SerialMonitorApp::run(data) {
+        println!("{:?}", e);
+        std::process::exit(1);
+    }
 }
