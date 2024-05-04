@@ -106,7 +106,7 @@ impl SerialMonitorApp {
         }
 
         for (i, slot) in self.data.inp_slots.iter_mut().enumerate() {
-            slot.value = self.values[i].last().unwrap_or(&[0.0, 0.0])[0];
+            slot.value = self.values[i].last().unwrap_or(&[0.0, 0.0])[1];
         }
     }
 

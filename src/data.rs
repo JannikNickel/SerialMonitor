@@ -63,7 +63,7 @@ impl ConnectionConfig {
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum PlotMode {
     Continous,
-    Redraw
+    Cyclic
 }
 
 impl Display for PlotMode {
@@ -81,7 +81,7 @@ impl Default for PlotConfig {
     fn default() -> Self {
         Self { 
             mode: PlotMode::Continous,
-            window: 30.0
+            window: 5.0
         }
     }
 }

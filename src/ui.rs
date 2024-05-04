@@ -4,7 +4,7 @@ use crate::serial_reader::{FlowCtrl, Parity, StartMode};
 use eframe::egui;
 use egui::emath::Numeric;
 use egui::{Align, Align2, Color32, Layout, Ui};
-use egui_plot::{Corner, Legend, Line, PlotPoints};
+use egui_plot::{Corner, Legend, Line, PlotPoints, VLine};
 use egui::ecolor::linear_u8_from_linear_f32;
 use std::fmt::Display;
 use std::iter::zip;
@@ -29,7 +29,7 @@ const START_MODES: &[StartMode] = &[
     StartMode::Delay(Duration::ZERO),
     StartMode::Message(String::new()),
 ];
-const PLOT_MODES: &[PlotMode] = &[PlotMode::Continous, PlotMode::Redraw];
+const PLOT_MODES: &[PlotMode] = &[PlotMode::Continous, PlotMode::Cyclic];
 
 pub struct Notification {
     pub start: Instant,
@@ -319,7 +319,24 @@ fn plot(_ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData,
         .show(ui, |ui| {
             for (slot, values) in zip(input_slots, input_values) {
                 let t_now = values.last().unwrap_or(&[0.0, 0.0])[0];
-                let filtered = values.iter().filter(|n| t_now - n[0] <= config.window).copied().collect::<Vec<[f64; 2]>>();
+                let filtered: Vec<[f64; 2]> = match config.mode {
+                    PlotMode::Continous => values.iter()
+                        .filter(|n| t_now - n[0] <= config.window)
+                        .copied()
+                        .collect::<Vec<[f64; 2]>>(),
+                    PlotMode::Cyclic => {
+                        let sub = t_now % config.window;
+                        let split = t_now - sub;
+                        let start = split - (config.window - sub);
+                        let mut v: Vec<[f64; 2]> = Vec::with_capacity(values.len());
+                        v.extend(values.iter()
+                            .filter(|n| n[0] > split));
+                        v.extend(values.iter()
+                            .filter(|n| n[0] >= start && n[0] < split)
+                            .map(|n| [n[0] + config.window, n[1]]));
+                        v
+                    }
+                };
                 let line = Line::new(PlotPoints::from(filtered))
                     .name(&slot.name)
                     .color(Color32::from_rgb(
@@ -328,6 +345,13 @@ fn plot(_ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData,
                         linear_u8_from_linear_f32(slot.color[2])
                     ));
                 ui.add(line);
+
+                if config.mode == PlotMode::Cyclic {
+                    let line = VLine::new(t_now)
+                        .color(Color32::WHITE)
+                        .width(1.5);
+                    ui.add(line);
+                }
             }
         });
     ui.add_space(PLOT_MARGIN);

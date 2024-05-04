@@ -165,6 +165,10 @@ impl SerialReader {
             let mut reader = BufReader::new(port);
             let mut line_buf = String::new();
             let start_time = Instant::now();
+            let start_off = match start_mode {
+                StartMode::Delay(delay) => delay.as_secs_f64(),
+                _ => 0.0
+            };
             let mut started = matches!(start_mode, StartMode::Immediate);
             loop {
                 if stop.load(Ordering::Relaxed) {
@@ -190,7 +194,7 @@ impl SerialReader {
                     Ok(_) => {
                         if let Ok(mut locked_lines) = lines.lock() {
                             locked_lines.push_back(Ok(Line {
-                                t: t.as_secs_f64(),
+                                t: t.as_secs_f64() - start_off,
                                 content: line.to_owned(),
                             }));
                         }
