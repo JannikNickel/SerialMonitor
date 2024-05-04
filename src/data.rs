@@ -1,5 +1,5 @@
 use crate::serial_reader::{FlowCtrl, Parity, SerialConfig, StartMode};
-use std::{fmt::Display, time::Duration};
+use std::{fmt::Display, sync::atomic::{AtomicUsize, Ordering}, time::Duration};
 
 #[derive(Clone)]
 pub struct ConnectionConfig {
@@ -74,7 +74,7 @@ impl Display for PlotMode {
 
 pub struct PlotConfig {
     pub mode: PlotMode,
-    pub window: f32
+    pub window: f64
 }
 
 impl Default for PlotConfig {
@@ -93,9 +93,26 @@ pub struct InputSlot {
     pub value: f64
 }
 
+pub struct PlotData {
+    pub id: usize,
+    pub name: String,
+}
+
+static PLOT_ID: AtomicUsize = AtomicUsize::new(1);
+
+impl PlotData {
+    pub fn new(name: &str) -> Self {
+        Self {
+            id: PLOT_ID.fetch_add(1, Ordering::SeqCst),
+            name: name.to_owned()
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct SerialMonitorData {
     pub conn_config: ConnectionConfig,
     pub plot_config: PlotConfig,
-    pub inp_slots: Vec<InputSlot>
+    pub inp_slots: Vec<InputSlot>,
+    pub plots: Vec<PlotData>
 }

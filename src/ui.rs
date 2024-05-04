@@ -1,17 +1,20 @@
 use crate::app::SerialMonitorApp;
-use crate::data::PlotMode;
+use crate::data::{InputSlot, PlotConfig, PlotData, PlotMode};
 use crate::serial_reader::{FlowCtrl, Parity, StartMode};
 use eframe::egui;
 use egui::emath::Numeric;
 use egui::{Align, Align2, Color32, Layout, Ui};
 use egui_plot::{Corner, Legend, Line, PlotPoints};
+use egui::ecolor::linear_u8_from_linear_f32;
 use std::fmt::Display;
+use std::iter::zip;
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant};
 
 const SIDEPANEL_WIDTH: f32 = 225.0;
 const DROPDOWN_WIDTH: f32 = 150.0;
 const STATUS_RADIUS: f32 = 6.0;
+const PLOT_MARGIN: f32 = 5.0;
 
 const BAUD_RATES: &[u32] = &[
     300, 600, 750, 1200, 2400, 4800, 9600, 19200, 31250, 38400, 57600, 74880, 115200, 230400,
@@ -44,6 +47,12 @@ impl Notification {
     }
 }
 
+enum PlotResponse {
+    None,
+    Reset,
+    Remove
+}
+
 pub struct SerialMonitorUI {
     notification: Option<Notification>
 }
@@ -57,7 +66,7 @@ impl SerialMonitorUI {
 
     pub fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame, app: &mut SerialMonitorApp) {
         self.config_panel(ctx, app);
-        self.data_panel(ctx);
+        self.data_panel(ctx, app);
         self.notification(ctx);
     }
 
@@ -80,7 +89,8 @@ impl SerialMonitorUI {
 
     fn conn_panel(&mut self, ctx: &egui::Context, ui: &mut Ui, app: &mut SerialMonitorApp) {
         ui.add_space(5.0);
-        let frame = egui::Frame::window(&ctx.style());
+        let frame = egui::Frame::window(&ctx.style())
+            .rounding(2.0);
         frame.show(ui, |ui| {
             ui.horizontal(|ui| {
                 let pos = egui::pos2(
@@ -143,7 +153,8 @@ impl SerialMonitorUI {
 
     fn plot_panel(&mut self, ctx: &egui::Context, ui: &mut Ui, app: &mut SerialMonitorApp) {
         ui.add_space(5.0);
-        let frame = egui::Frame::window(&ctx.style());
+        let frame = egui::Frame::window(&ctx.style())
+            .rounding(2.0);
         frame.show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Plot Settings");
@@ -151,15 +162,16 @@ impl SerialMonitorUI {
             });
             ui.separator();
 
-            let config = app.plot_config();
+            let config = app.plot_config_mut();
             option_dropdown(ui, "Mode", PLOT_MODES, &mut config.mode, 24.0);
-            drag_value(ui, "Window (s)", &mut config.window, -3.5, 0.0..=100000.0, 2, "s");
+            drag_value(ui, "Window (s)", &mut config.window, -3.5, 0.0..=SerialMonitorApp::STORED_DURATION, 2, "s");
         });
     }
 
     fn input_panel(&mut self, ctx: &egui::Context, ui: &mut Ui, app: &mut SerialMonitorApp) {
         ui.add_space(5.0);
-        let frame = egui::Frame::window(&ctx.style());
+        let frame = egui::Frame::window(&ctx.style())
+            .rounding(2.0);
         frame.show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Serial Input");
@@ -169,7 +181,7 @@ impl SerialMonitorUI {
 
             if app.is_connected() && app.has_input() {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for slot in app.input_slots() {
+                    for slot in app.input_slots_mut() {
                         ui.horizontal(|ui| {
                             ui.color_edit_button_rgb(&mut slot.color);
                             egui::TextEdit::singleline(&mut slot.name).desired_width(100.0).show(ui);
@@ -184,35 +196,44 @@ impl SerialMonitorUI {
         });
     }
 
-    fn data_panel(&mut self, ctx: &egui::Context) {
+    fn data_panel(&mut self, ctx: &egui::Context, app: &mut SerialMonitorApp) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let frame = egui::Frame::window(&ctx.style());
-            frame.show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("Add Plot").clicked() {}
-                    if ui.button("Add Console").clicked() {}
-                    if ui.button("Save Config").clicked() {}
-                    if ui.button("Load Config").clicked() {}
-                    ui.add_space(ui.available_width());
-                });
+            ui.horizontal(|ui| {
+                if ui.button("Add Plot").clicked() {
+                    app.add_plot();
+                }
+                if ui.button("Add Console").clicked() {}
+                if ui.button("Save Config").clicked() {}
+                if ui.button("Load Config").clicked() {}
+                ui.add_space(ui.available_width());
             });
-
-            let frame = egui::Frame::window(&ctx.style());
-            frame.show(ui, |ui| {
-                let graph: Vec<[f64; 2]> = vec![[0.0, 0.66], [0.33, 0.33], [0.66, 0.5], [1.0, 0.9]];
-                ui.horizontal(|ui| {
-                    ui.heading("Plot 1");
-                    if ui.button("Reset").clicked() {}
-                });
-                egui_plot::Plot::new("Plot1")
-                    .legend(Legend::default().position(Corner::LeftTop))
-                    .height(256.0)
-                    .x_axis_formatter(|grid_pt, _, _| format!("{:.2}s", grid_pt.value))
-                    .y_axis_formatter(|grid_pt, _, _| format!("{:.2}", grid_pt.value))
-                    .y_axis_width(3)
-                    .show(ui, |ui| {
-                        ui.line(Line::new(PlotPoints::from(graph)).name("line"));
-                    });
+            ui.separator();
+            
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let frame = egui::Frame::none()
+                    .inner_margin(0.0)
+                    .outer_margin(0.0);
+                let mut i = 0;
+                while i < app.plots().len() {
+                    let mut inc = 1;
+                    egui::TopBottomPanel::top(format!("PlotContainer_{}", app.plots()[i].id))
+                        .frame(frame)
+                        .default_height(256.0)
+                        .min_height(128.0)
+                        .resizable(true)
+                        .show_inside(ui, |ui| {
+                            let resp = plot(ctx, ui, app.plot_config(), &app.plots()[i], app.input_slots(), app.raw_values());
+                            match resp {
+                                PlotResponse::Reset => app.reset_plot(i),
+                                PlotResponse::Remove => {
+                                    app.remove_plot(i);
+                                    inc = 0;
+                                },
+                                _ => ()
+                            }
+                        });
+                    i += inc;
+                }
             });
         });
     }
@@ -267,4 +288,49 @@ fn drag_value<T: Numeric>(ui: &mut egui::Ui, label: &'static str, value: &mut T,
                 .suffix(suffix));
         });
     });
+}
+
+fn plot(_ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData, input_slots: &Vec<InputSlot>, input_values: &Vec<Vec<[f64; 2]>>) -> PlotResponse {
+    ui.add_space(PLOT_MARGIN);
+
+    let mut result = PlotResponse::None;
+    ui.horizontal(|ui| {
+        ui.heading(&plot.name);
+        if ui.button("Reset").clicked() {
+            result = PlotResponse::Reset;
+        }
+        if ui.button("Delete").clicked() {
+            result = PlotResponse::Remove;
+        }
+    });
+    if matches!(result, PlotResponse::Remove) {
+        return result;
+    }
+
+    egui_plot::Plot::new(&plot.id.to_string())
+        .legend(Legend::default().position(Corner::LeftTop))
+        .height(ui.available_height() - (PLOT_MARGIN + ui.style().spacing.item_spacing.y))
+        .x_axis_formatter(|grid_pt, _, _| format!("{:.2}s", grid_pt.value))
+        .y_axis_formatter(|grid_pt, _, _| format!("{:.2}", grid_pt.value))
+        .y_axis_width(3)
+        .allow_scroll(false)
+        .allow_zoom(false)
+        .allow_drag(false)
+        .show(ui, |ui| {
+            for (slot, values) in zip(input_slots, input_values) {
+                let t_now = values.last().unwrap_or(&[0.0, 0.0])[0];
+                let filtered = values.iter().filter(|n| t_now - n[0] <= config.window).copied().collect::<Vec<[f64; 2]>>();
+                let line = Line::new(PlotPoints::from(filtered))
+                    .name(&slot.name)
+                    .color(Color32::from_rgb(
+                        linear_u8_from_linear_f32(slot.color[0]),
+                        linear_u8_from_linear_f32(slot.color[1]),
+                        linear_u8_from_linear_f32(slot.color[2])
+                    ));
+                ui.add(line);
+            }
+        });
+    ui.add_space(PLOT_MARGIN);
+    
+    result
 }

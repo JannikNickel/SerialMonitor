@@ -1,7 +1,8 @@
-use crate::data::{ConnectionConfig, InputSlot, PlotConfig, SerialMonitorData};
+use crate::data::{ConnectionConfig, InputSlot, PlotConfig, PlotData, SerialMonitorData};
 use crate::serial_parser::SerialParser;
 use crate::serial_reader::{SerialConfig, SerialError, SerialReader, StartMode};
 use crate::ui::{Notification, SerialMonitorUI};
+use std::iter::zip;
 use std::time::Duration;
 use egui::ecolor::rgb_from_hsv;
 
@@ -15,10 +16,12 @@ pub struct SerialMonitorApp {
     reader: Option<SerialReader>,
     parser: SerialParser,
 
-    curr_values: Vec<f64>,
+    values: Vec<Vec<[f64; 2]>>
 }
 
 impl SerialMonitorApp {
+    pub const STORED_DURATION: f64 = 60.0;
+
     pub fn run(data: SerialMonitorData) -> Result<(), String> {
         let native_opts = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
@@ -36,7 +39,7 @@ impl SerialMonitorApp {
                     ui: Some(ui),
                     reader: None,
                     parser: SerialParser::new(),
-                    curr_values: vec![]
+                    values: vec![],
                 };
                 Box::new(app)
             }),
@@ -64,7 +67,7 @@ impl SerialMonitorApp {
                 match &line {
                     Ok(line) => {
                         match self.parser.parse_values(&line.content) {
-                            Ok(values) => self.handle_input(&values),
+                            Ok(values) => self.handle_input(line.t, &values),
                             Err(e) => self.error(&e.to_string())
                         }
                     },
@@ -75,16 +78,18 @@ impl SerialMonitorApp {
         }
     }
 
-    fn handle_input(&mut self, values: &Vec<f64>) {
-        if self.curr_values.len() == values.len() {
-            self.curr_values.copy_from_slice(&values);
-        } else {
-            self.curr_values = values.clone();
+    fn handle_input(&mut self, t: f64, values: &Vec<f64>) {
+        while self.values.len() < values.len() {
+            self.values.push(vec![]);
         }
-        for v in values {
-            print!("{}, ", v);
+        for (l, r) in zip(&mut self.values, values) {
+            l.push([t, *r]);
         }
-        println!();
+        // print!("[{:.2}] ", t);
+        // for v in values {
+        //     print!("{}, ", v);
+        // }
+        // println!();
     }
 
     fn prep_input_slots(&mut self, slots: usize) {
@@ -101,7 +106,7 @@ impl SerialMonitorApp {
         }
 
         for (i, slot) in self.data.inp_slots.iter_mut().enumerate() {
-            slot.value = self.curr_values[i];
+            slot.value = self.values[i].last().unwrap_or(&[0.0, 0.0])[0];
         }
     }
 
@@ -116,12 +121,28 @@ impl SerialMonitorApp {
         &mut self.data.conn_config
     }
 
-    pub fn plot_config(&mut self) -> &mut PlotConfig {
+    pub fn plot_config_mut(&mut self) -> &mut PlotConfig {
         &mut self.data.plot_config
     }
 
-    pub fn input_slots(&mut self) -> &mut Vec<InputSlot> {
+    pub fn plot_config(&self) -> &PlotConfig {
+        &self.data.plot_config
+    }
+
+    pub fn input_slots_mut(&mut self) -> &mut Vec<InputSlot> {
         &mut self.data.inp_slots
+    }
+
+    pub fn input_slots(&self) -> &Vec<InputSlot> {
+        &self.data.inp_slots
+    }
+
+    pub fn plots(&self) -> &Vec<PlotData> {
+        &self.data.plots
+    }
+
+    pub fn raw_values(&self) -> &Vec<Vec<[f64; 2]>> {
+        &self.values
     }
 
     pub fn available_devices(&self) -> Vec<String> {
@@ -160,6 +181,18 @@ impl SerialMonitorApp {
 
     pub fn has_input(&self) -> bool {
         self.parser.columns() > 0
+    }
+
+    pub fn add_plot(&mut self) {
+        self.data.plots.push(PlotData::new(&format!("Plot {}", self.data.plots.len() + 1)));
+    }
+
+    pub fn remove_plot(&mut self, index: usize) {
+        self.data.plots.remove(index);
+    }
+
+    pub fn reset_plot(&mut self, index: usize) {
+        
     }
 }
 
