@@ -1,16 +1,21 @@
-use crate::data::{ConnectionConfig, PlotConfig, SerialMonitorData};
+use crate::data::{ConnectionConfig, InputSlot, PlotConfig, SerialMonitorData};
+use crate::serial_parser::SerialParser;
 use crate::serial_reader::{SerialConfig, SerialError, SerialReader, StartMode};
-use crate::ui::SerialMonitorUI;
+use crate::ui::{Notification, SerialMonitorUI};
+use std::time::Duration;
+use egui::ecolor::rgb_from_hsv;
 
 const WIN_WIDTH: f32 = 1280.0;
 const WIN_HEIGHT: f32 = 720.0;
 
-#[derive(Default)]
 pub struct SerialMonitorApp {
     data: SerialMonitorData,
     ui: Option<SerialMonitorUI>,
 
-    reader: Option<SerialReader>
+    reader: Option<SerialReader>,
+    parser: SerialParser,
+
+    curr_values: Vec<f64>,
 }
 
 impl SerialMonitorApp {
@@ -29,7 +34,9 @@ impl SerialMonitorApp {
                 let app = SerialMonitorApp {
                     data,
                     ui: Some(ui),
-                    ..Default::default()
+                    reader: None,
+                    parser: SerialParser::new(),
+                    curr_values: vec![]
                 };
                 Box::new(app)
             }),
@@ -39,6 +46,8 @@ impl SerialMonitorApp {
 
     pub fn update(&mut self) {
         self.reset_port_if_missing();
+        self.read_input();
+        self.prep_input_slots(self.parser.columns());
     }
 
     pub fn reset_port_if_missing(&mut self) -> bool {
@@ -49,12 +58,70 @@ impl SerialMonitorApp {
         false
     }
 
+    fn read_input(&mut self) {
+        if let Some(mut reader) = self.reader.take() {
+            while let Some(line) = reader.get_line() {
+                match &line {
+                    Ok(line) => {
+                        match self.parser.parse_values(&line.content) {
+                            Ok(values) => self.handle_input(&values),
+                            Err(e) => self.error(&e.to_string())
+                        }
+                    },
+                    Err(e) => self.error(&e.to_string())
+                }
+            }
+            self.reader = Some(reader);
+        }
+    }
+
+    fn handle_input(&mut self, values: &Vec<f64>) {
+        if self.curr_values.len() == values.len() {
+            self.curr_values.copy_from_slice(&values);
+        } else {
+            self.curr_values = values.clone();
+        }
+        for v in values {
+            print!("{}, ", v);
+        }
+        println!();
+    }
+
+    fn prep_input_slots(&mut self, slots: usize) {
+        if self.data.inp_slots.len() < slots {
+            for i in self.data.inp_slots.len()..slots {
+                let col = rgb_from_hsv((i as f32 * 0.15 % 1.0, 0.8, 0.8));
+                let slot = InputSlot {
+                    name: format!("Slot {}", (i + 1)),
+                    color: col,
+                    value: 0.0
+                };
+                self.data.inp_slots.push(slot);
+            }
+        }
+
+        for (i, slot) in self.data.inp_slots.iter_mut().enumerate() {
+            slot.value = self.curr_values[i];
+        }
+    }
+
+    fn error(&mut self, msg: &str) {
+        if let Some(ui) = &mut self.ui {
+            ui.set_notification(Notification::new(msg, Duration::from_secs(5)));
+        }
+        self.disconnect_current();
+    }
+
     pub fn conn_config(&mut self) -> &mut ConnectionConfig {
         &mut self.data.conn_config
     }
 
     pub fn plot_config(&mut self) -> &mut PlotConfig {
         &mut self.data.plot_config
+    }
+
+    pub fn input_slots(&mut self) -> &mut Vec<InputSlot> {
+        &mut self.data.inp_slots
     }
 
     pub fn available_devices(&self) -> Vec<String> {
@@ -86,7 +153,13 @@ impl SerialMonitorApp {
     pub fn disconnect_current(&mut self) {
         if let Some(reader) = self.reader.take() {
             std::mem::drop(reader);
+            self.parser.reset();
+            self.data.inp_slots.clear();
         }
+    }
+
+    pub fn has_input(&self) -> bool {
+        self.parser.columns() > 0
     }
 }
 
@@ -97,5 +170,6 @@ impl eframe::App for SerialMonitorApp {
             ui.update(ctx, frame, self);
             self.ui = Some(ui);
         }
+        ctx.request_repaint();
     }
 }

@@ -28,7 +28,7 @@ const START_MODES: &[StartMode] = &[
 ];
 const PLOT_MODES: &[PlotMode] = &[PlotMode::Continous, PlotMode::Redraw];
 
-struct Notification {
+pub struct Notification {
     pub start: Instant,
     pub duration: Duration,
     pub text: String
@@ -61,6 +61,10 @@ impl SerialMonitorUI {
         self.notification(ctx);
     }
 
+    pub fn set_notification(&mut self, notification: Notification) {
+        self.notification = Some(notification);
+    }
+
     fn config_panel(&mut self, ctx: &egui::Context, app: &mut SerialMonitorApp) {
         egui::SidePanel::left("ConnPanel")
             .exact_width(SIDEPANEL_WIDTH)
@@ -70,6 +74,7 @@ impl SerialMonitorUI {
             .show(ctx, |ui| {
                 self.conn_panel(ctx, ui, app);
                 self.plot_panel(ctx, ui, app);
+                self.input_panel(ctx, ui, app);
             });
     }
 
@@ -100,7 +105,7 @@ impl SerialMonitorUI {
                 if connect_resp.clicked() {
                     if !app.is_connected() {
                         if let Err(e) = app.connect_current() {
-                            self.notification = Some(Notification::new(format!("Could not connect! ({})", e.to_string()).as_str(), Duration::from_secs(5)));
+                            self.set_notification(Notification::new(format!("Could not connect! ({})", e.to_string()).as_str(), Duration::from_secs(5)));
                         }
                     } else {
                         app.disconnect_current();
@@ -149,6 +154,33 @@ impl SerialMonitorUI {
             let config = app.plot_config();
             option_dropdown(ui, "Mode", PLOT_MODES, &mut config.mode, 24.0);
             drag_value(ui, "Window (s)", &mut config.window, -3.5, 0.0..=100000.0, 2, "s");
+        });
+    }
+
+    fn input_panel(&mut self, ctx: &egui::Context, ui: &mut Ui, app: &mut SerialMonitorApp) {
+        ui.add_space(5.0);
+        let frame = egui::Frame::window(&ctx.style());
+        frame.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading("Serial Input");
+                ui.add_space(ui.available_width());
+            });
+            ui.separator();
+
+            if app.is_connected() && app.has_input() {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for slot in app.input_slots() {
+                        ui.horizontal(|ui| {
+                            ui.color_edit_button_rgb(&mut slot.color);
+                            egui::TextEdit::singleline(&mut slot.name).desired_width(100.0).show(ui);
+                            ui.separator();
+                            ui.label(format!("{:.2}", slot.value));
+                        });
+                    }
+                });
+            } else {
+                ui.label("Waiting for input...");
+            }
         });
     }
 

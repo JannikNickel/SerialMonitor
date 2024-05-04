@@ -1,6 +1,5 @@
-use std::{fmt::Display, time::Duration};
-
 use crate::serial_reader::{FlowCtrl, Parity, SerialConfig, StartMode};
+use std::{fmt::Display, time::Duration};
 
 #[derive(Clone)]
 pub struct ConnectionConfig {
@@ -25,8 +24,8 @@ impl Default for ConnectionConfig {
             parity: Parity::None,
             stop_bits: 1,
             flow_ctrl: FlowCtrl::None,
-            dtr: false,
-            start_mode: StartMode::Immediate,
+            dtr: true,
+            start_mode: StartMode::Delay(Duration::ZERO),
             start_delay: 1000,
             start_msg: String::from("Start")
         }
@@ -88,7 +87,15 @@ impl Default for PlotConfig {
 }
 
 #[derive(Default)]
+pub struct InputSlot {
+    pub name: String,
+    pub color: [f32; 3],
+    pub value: f64
+}
+
+#[derive(Default)]
 pub struct SerialMonitorData {
     pub conn_config: ConnectionConfig,
     pub plot_config: PlotConfig,
+    pub inp_slots: Vec<InputSlot>
 }

@@ -3,6 +3,7 @@
 mod app;
 mod data;
 mod serial_reader;
+mod serial_parser;
 mod ui;
 
 use app::SerialMonitorApp;

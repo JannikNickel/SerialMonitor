@@ -187,10 +187,14 @@ impl SerialReader {
 
                 match res {
                     Ok(0) => break,
-                    Ok(_) => lines.lock().unwrap().push_back(Ok(Line {
-                        t: t.as_secs_f64(),
-                        content: line.to_owned(),
-                    })),
+                    Ok(_) => {
+                        if let Ok(mut locked_lines) = lines.lock() {
+                            locked_lines.push_back(Ok(Line {
+                                t: t.as_secs_f64(),
+                                content: line.to_owned(),
+                            }));
+                        }
+                    },
                     Err(e) => {
                         if let Ok(mut locked_lines) = lines.lock() {
                             locked_lines.push_back(Err(SerialError::ReadError(e.to_string())));
