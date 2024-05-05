@@ -176,6 +176,7 @@ impl SerialMonitorApp {
             std::mem::drop(reader);
             self.parser.reset();
             self.data.inp_slots.clear();
+            self.values.clear();
         }
     }
 

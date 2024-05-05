@@ -72,16 +72,35 @@ impl Display for PlotMode {
     }
 }
 
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum PlotScaleMode {
+    Auto,
+    AutoMax,
+    Manual
+}
+
+impl Display for PlotScaleMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 pub struct PlotConfig {
     pub mode: PlotMode,
-    pub window: f64
+    pub window: f64,
+    pub scale_mode: PlotScaleMode,
+    pub y_min: f64,
+    pub y_max: f64
 }
 
 impl Default for PlotConfig {
     fn default() -> Self {
         Self { 
             mode: PlotMode::Continous,
-            window: 5.0
+            window: 5.0,
+            scale_mode: PlotScaleMode::Auto,
+            y_min: 0.0,
+            y_max: 1.0
         }
     }
 }

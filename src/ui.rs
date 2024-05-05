@@ -1,11 +1,13 @@
 use crate::app::SerialMonitorApp;
-use crate::data::{InputSlot, PlotConfig, PlotData, PlotMode};
+use crate::data::{InputSlot, PlotConfig, PlotData, PlotMode, PlotScaleMode};
 use crate::serial_reader::{FlowCtrl, Parity, StartMode};
 use eframe::egui;
 use egui::emath::Numeric;
-use egui::{Align, Align2, Color32, Layout, Ui};
-use egui_plot::{Corner, Legend, Line, PlotPoints, VLine};
+use egui::{Align, Align2, Color32, Id, Layout, Ui};
+use egui_plot::{Corner, Legend, Line, PlotBounds, PlotMemory, PlotPoints, VLine};
 use egui::ecolor::linear_u8_from_linear_f32;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::iter::zip;
 use std::ops::RangeInclusive;
@@ -30,6 +32,7 @@ const START_MODES: &[StartMode] = &[
     StartMode::Message(String::new()),
 ];
 const PLOT_MODES: &[PlotMode] = &[PlotMode::Continous, PlotMode::Cyclic];
+const SCALE_MODES: &[PlotScaleMode] = &[PlotScaleMode::Auto, PlotScaleMode::AutoMax, PlotScaleMode::Manual];
 
 pub struct Notification {
     pub start: Instant,
@@ -47,6 +50,7 @@ impl Notification {
     }
 }
 
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum PlotResponse {
     None,
     Reset,
@@ -54,13 +58,15 @@ enum PlotResponse {
 }
 
 pub struct SerialMonitorUI {
-    notification: Option<Notification>
+    notification: Option<Notification>,
+    plot_ranges: HashMap<usize, [f64; 2]>
 }
 
 impl SerialMonitorUI {
     pub fn new(_context: &eframe::CreationContext<'_>) -> Self {
         Self {
-            notification: None
+            notification: None,
+            plot_ranges: HashMap::new()
         }
     }
 
@@ -165,6 +171,11 @@ impl SerialMonitorUI {
             let config = app.plot_config_mut();
             option_dropdown(ui, "Mode", PLOT_MODES, &mut config.mode, 24.0);
             drag_value(ui, "Window (s)", &mut config.window, -3.5, 0.0..=SerialMonitorApp::STORED_DURATION, 2, "s");
+            option_dropdown(ui, "Scale", SCALE_MODES, &mut config.scale_mode, 29.0);
+            if config.scale_mode == PlotScaleMode::Manual {
+                drag_value(ui, "Min", &mut config.y_min, 36.0, f64::MIN..=config.y_max, 2, "");
+                drag_value(ui, "Max", &mut config.y_max, 33.5, config.y_min..=f64::MAX, 2, "");
+            }
         });
     }
 
@@ -222,9 +233,12 @@ impl SerialMonitorUI {
                         .min_height(128.0)
                         .resizable(true)
                         .show_inside(ui, |ui| {
-                            let resp = plot(ctx, ui, app.plot_config(), &app.plots()[i], app.input_slots(), app.raw_values());
+                            let resp = self.plot(ctx, ui, app.plot_config(), &app.plots()[i], app.input_slots(), app.raw_values());
                             match resp {
-                                PlotResponse::Reset => app.reset_plot(i),
+                                PlotResponse::Reset => {
+                                    self.plot_ranges.remove(&app.plots()[i].id);
+                                    app.reset_plot(i);
+                                },
                                 PlotResponse::Remove => {
                                     app.remove_plot(i);
                                     inc = 0;
@@ -260,6 +274,121 @@ impl SerialMonitorUI {
                 });
         }
     }
+
+    fn plot(&mut self, ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData, input_slots: &Vec<InputSlot>, input_values: &Vec<Vec<[f64; 2]>>) -> PlotResponse {
+        ui.add_space(PLOT_MARGIN);
+    
+        let mut result = PlotResponse::None;
+        ui.horizontal(|ui| {
+            ui.heading(&plot.name);
+            if ui.button("Reset").clicked() {
+                result = PlotResponse::Reset;
+            }
+            if ui.button("Delete").clicked() {
+                result = PlotResponse::Remove;
+            }
+        });
+        if result == PlotResponse::Remove {
+            return result;
+        }
+    
+        let plt_id = format!("Plot_{}", plot.id);
+        egui_plot::Plot::new(&plt_id)
+            .id(Id::new(&plt_id))
+            .legend(Legend::default().position(Corner::LeftTop))
+            .height(ui.available_height() - (PLOT_MARGIN + ui.style().spacing.item_spacing.y))
+            .x_axis_formatter(|grid_pt, _, _| format!("{:.2}s", grid_pt.value))
+            .y_axis_formatter(|grid_pt, _, _| format!("{:.2}", grid_pt.value))
+            .y_axis_width(3)
+            .allow_scroll(false)
+            .allow_zoom(false)
+            .allow_boxed_zoom(false)
+            .allow_drag(false)
+            .allow_double_click_reset(false)
+            .auto_bounds(egui::Vec2b::from([true, config.scale_mode != PlotScaleMode::Manual]))
+            .show(ui, |ui| {
+                let mut min = f64::MAX;
+                let mut max = f64::MIN;
+
+                for (slot, values) in zip(input_slots, input_values) {
+                    let hidden = PlotMemory::load(&ctx, Id::new(&plt_id))
+                        .map_or(false, |mem| mem.hidden_items.contains(&slot.name));
+                    
+                    let t_now = values.last().unwrap_or(&[0.0, 0.0])[0];
+                    let filtered: Vec<[f64; 2]> = match config.mode {
+                        PlotMode::Continous => values.iter()
+                            .filter(|n| t_now - n[0] <= config.window)
+                            .copied()
+                            .collect::<Vec<[f64; 2]>>(),
+                        PlotMode::Cyclic => {
+                            let sub = t_now % config.window;
+                            let split = t_now - sub;
+                            let start = split - (config.window - sub);
+                            let mut v: Vec<[f64; 2]> = Vec::with_capacity(values.len());
+                            v.extend(values.iter()
+                                .filter(|n| n[0] > split));
+                            v.extend(values.iter()
+                                .filter(|n| n[0] >= start && n[0] < split)
+                                .map(|n| [n[0] + config.window, n[1]]));
+                            v
+                        }
+                    };
+
+                    if config.scale_mode == PlotScaleMode::AutoMax && !hidden {
+                        let (local_min, local_max) = filtered.iter()
+                            .fold((f64::MAX, f64::MIN), |(min, max), n| {
+                                (f64::min(min, n[1]), f64::max(max, n[1]))
+                            });
+                        min = f64::min(min, local_min);
+                        max = f64::max(max, local_max);
+                    }
+    
+                    let line = Line::new(PlotPoints::from(filtered))
+                        .name(&slot.name)
+                        .color(Color32::from_rgb(
+                            linear_u8_from_linear_f32(slot.color[0]),
+                            linear_u8_from_linear_f32(slot.color[1]),
+                            linear_u8_from_linear_f32(slot.color[2])
+                        ));
+                    ui.add(line);
+    
+                    if config.mode == PlotMode::Cyclic {
+                        let line = VLine::new(t_now)
+                            .color(Color32::WHITE)
+                            .width(1.5);
+                        ui.add(line);
+                    }
+                }
+
+                let bounds_x: RangeInclusive<f64> = ui.plot_bounds().range_x();
+                match config.scale_mode {
+                    PlotScaleMode::Auto => {
+                        ui.set_auto_bounds(egui::Vec2b::from([true, true]));
+                    },
+                    PlotScaleMode::AutoMax => {
+                        let entry = match self.plot_ranges.entry(plot.id) {
+                            Entry::Occupied(o) => o.into_mut(),
+                            Entry::Vacant(v) => v.insert([min, max])
+                        };
+                        entry[0] = f64::min(entry[0], min);
+                        entry[1] = f64::max(entry[1], max);
+                        ui.set_plot_bounds(PlotBounds::from_min_max(
+                            [*bounds_x.start(), entry[0]], 
+                            [*bounds_x.end(), entry[1]]));
+                        ui.set_auto_bounds(egui::Vec2b::from([true, false]));
+                    },
+                    PlotScaleMode::Manual => {
+                        ui.set_plot_bounds(PlotBounds::from_min_max(
+                            [*bounds_x.start(), config.y_min], 
+                            [*bounds_x.end(), config.y_max]));
+                        ui.set_auto_bounds(egui::Vec2b::from([true, false]));
+                    }
+                }
+            });
+        ui.add_space(PLOT_MARGIN);
+        
+        result
+    }
 }
 
 fn option_dropdown<T: PartialEq + Clone + Display>(ui: &mut egui::Ui, label: &'static str, options: &[T], value: &mut T, spacing: f32) {
@@ -288,73 +417,4 @@ fn drag_value<T: Numeric>(ui: &mut egui::Ui, label: &'static str, value: &mut T,
                 .suffix(suffix));
         });
     });
-}
-
-fn plot(_ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData, input_slots: &Vec<InputSlot>, input_values: &Vec<Vec<[f64; 2]>>) -> PlotResponse {
-    ui.add_space(PLOT_MARGIN);
-
-    let mut result = PlotResponse::None;
-    ui.horizontal(|ui| {
-        ui.heading(&plot.name);
-        if ui.button("Reset").clicked() {
-            result = PlotResponse::Reset;
-        }
-        if ui.button("Delete").clicked() {
-            result = PlotResponse::Remove;
-        }
-    });
-    if matches!(result, PlotResponse::Remove) {
-        return result;
-    }
-
-    egui_plot::Plot::new(&plot.id.to_string())
-        .legend(Legend::default().position(Corner::LeftTop))
-        .height(ui.available_height() - (PLOT_MARGIN + ui.style().spacing.item_spacing.y))
-        .x_axis_formatter(|grid_pt, _, _| format!("{:.2}s", grid_pt.value))
-        .y_axis_formatter(|grid_pt, _, _| format!("{:.2}", grid_pt.value))
-        .y_axis_width(3)
-        .allow_scroll(false)
-        .allow_zoom(false)
-        .allow_drag(false)
-        .show(ui, |ui| {
-            for (slot, values) in zip(input_slots, input_values) {
-                let t_now = values.last().unwrap_or(&[0.0, 0.0])[0];
-                let filtered: Vec<[f64; 2]> = match config.mode {
-                    PlotMode::Continous => values.iter()
-                        .filter(|n| t_now - n[0] <= config.window)
-                        .copied()
-                        .collect::<Vec<[f64; 2]>>(),
-                    PlotMode::Cyclic => {
-                        let sub = t_now % config.window;
-                        let split = t_now - sub;
-                        let start = split - (config.window - sub);
-                        let mut v: Vec<[f64; 2]> = Vec::with_capacity(values.len());
-                        v.extend(values.iter()
-                            .filter(|n| n[0] > split));
-                        v.extend(values.iter()
-                            .filter(|n| n[0] >= start && n[0] < split)
-                            .map(|n| [n[0] + config.window, n[1]]));
-                        v
-                    }
-                };
-                let line = Line::new(PlotPoints::from(filtered))
-                    .name(&slot.name)
-                    .color(Color32::from_rgb(
-                        linear_u8_from_linear_f32(slot.color[0]),
-                        linear_u8_from_linear_f32(slot.color[1]),
-                        linear_u8_from_linear_f32(slot.color[2])
-                    ));
-                ui.add(line);
-
-                if config.mode == PlotMode::Cyclic {
-                    let line = VLine::new(t_now)
-                        .color(Color32::WHITE)
-                        .width(1.5);
-                    ui.add(line);
-                }
-            }
-        });
-    ui.add_space(PLOT_MARGIN);
-    
-    result
 }
