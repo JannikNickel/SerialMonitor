@@ -85,11 +85,6 @@ impl SerialMonitorApp {
         for (l, r) in zip(&mut self.values, values) {
             l.push([t, *r]);
         }
-        // print!("[{:.2}] ", t);
-        // for v in values {
-        //     print!("{}, ", v);
-        // }
-        // println!();
     }
 
     fn prep_input_slots(&mut self, slots: usize) {
@@ -97,6 +92,7 @@ impl SerialMonitorApp {
             for i in self.data.inp_slots.len()..slots {
                 let col = rgb_from_hsv((i as f32 * 0.15 % 1.0, 0.8, 0.8));
                 let slot = InputSlot {
+                    index: i,
                     name: format!("Slot {}", (i + 1)),
                     color: col,
                     value: 0.0
@@ -135,6 +131,10 @@ impl SerialMonitorApp {
 
     pub fn input_slots(&self) -> &Vec<InputSlot> {
         &self.data.inp_slots
+    }
+
+    pub fn plots_mut(&mut self) -> &mut Vec<PlotData> {
+        &mut self.data.plots
     }
 
     pub fn plots(&self) -> &Vec<PlotData> {
@@ -193,7 +193,7 @@ impl SerialMonitorApp {
     }
 
     pub fn reset_plot(&mut self, index: usize) {
-        
+        self.data.plots[index].hidden.clear();
     }
 }
 

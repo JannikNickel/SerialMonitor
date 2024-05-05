@@ -233,7 +233,7 @@ impl SerialMonitorUI {
                         .min_height(128.0)
                         .resizable(true)
                         .show_inside(ui, |ui| {
-                            let resp = self.plot(ctx, ui, app.plot_config(), &app.plots()[i], app.input_slots(), app.raw_values());
+                            let (resp, hidden) = self.plot(ctx, ui, app.plot_config(), &app.plots()[i], app.input_slots(), app.raw_values());
                             match resp {
                                 PlotResponse::Reset => {
                                     self.plot_ranges.remove(&app.plots()[i].id);
@@ -243,7 +243,9 @@ impl SerialMonitorUI {
                                     app.remove_plot(i);
                                     inc = 0;
                                 },
-                                _ => ()
+                                _ => if let Some(h) = hidden {
+                                    app.plots_mut()[i].hidden = h;
+                                }
                             }
                         });
                     i += inc;
@@ -275,7 +277,7 @@ impl SerialMonitorUI {
         }
     }
 
-    fn plot(&mut self, ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData, input_slots: &Vec<InputSlot>, input_values: &Vec<Vec<[f64; 2]>>) -> PlotResponse {
+    fn plot(&mut self, ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData, input_slots: &Vec<InputSlot>, input_values: &Vec<Vec<[f64; 2]>>) -> (PlotResponse, Option<Vec<usize>>) {
         ui.add_space(PLOT_MARGIN);
     
         let mut result = PlotResponse::None;
@@ -289,13 +291,24 @@ impl SerialMonitorUI {
             }
         });
         if result == PlotResponse::Remove {
-            return result;
+            return (result, None);
         }
     
         let plt_id = format!("Plot_{}", plot.id);
+        let empty = input_slots.is_empty();
+
+        let hidden = plot.hidden.iter().map(|n| match input_slots.get(*n) {
+            Some(slot) => slot.name.clone(),
+            None => String::new()
+        });
+        let mut legend = Legend::default().position(Corner::LeftTop);
+        if !empty {
+            legend = legend.hidden_items(hidden);
+        }
+    
         egui_plot::Plot::new(&plt_id)
             .id(Id::new(&plt_id))
-            .legend(Legend::default().position(Corner::LeftTop))
+            .legend(legend)
             .height(ui.available_height() - (PLOT_MARGIN + ui.style().spacing.item_spacing.y))
             .x_axis_formatter(|grid_pt, _, _| format!("{:.2}s", grid_pt.value))
             .y_axis_formatter(|grid_pt, _, _| format!("{:.2}", grid_pt.value))
@@ -385,9 +398,20 @@ impl SerialMonitorUI {
                     }
                 }
             });
-        ui.add_space(PLOT_MARGIN);
-        
-        result
+
+        let hidden = PlotMemory::load(&ctx, Id::new(&plt_id))
+            .map_or_else(Vec::new, |mem| {
+                input_slots.iter()
+                    .filter(|slot| mem.hidden_items.contains(&slot.name))
+                    .map(|slot| slot.index)
+                    .collect()
+            });
+
+        ui.add_space(PLOT_MARGIN);        
+        (result, match !empty {
+            true => Some(hidden),
+            false => None
+        })
     }
 }
 

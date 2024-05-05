@@ -107,6 +107,7 @@ impl Default for PlotConfig {
 
 #[derive(Default)]
 pub struct InputSlot {
+    pub index: usize,
     pub name: String,
     pub color: [f32; 3],
     pub value: f64
@@ -115,6 +116,7 @@ pub struct InputSlot {
 pub struct PlotData {
     pub id: usize,
     pub name: String,
+    pub hidden: Vec<usize>
 }
 
 static PLOT_ID: AtomicUsize = AtomicUsize::new(1);
@@ -123,7 +125,8 @@ impl PlotData {
     pub fn new(name: &str) -> Self {
         Self {
             id: PLOT_ID.fetch_add(1, Ordering::SeqCst),
-            name: name.to_owned()
+            name: name.to_owned(),
+            hidden: Vec::new()
         }
     }
 }
