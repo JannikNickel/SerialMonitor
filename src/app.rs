@@ -18,7 +18,9 @@ pub struct SerialMonitorApp {
     parser: SerialParser,
 
     values: Vec<Vec<[f64; 2]>>,
-    lines: VecDeque<String>
+    lines: VecDeque<String>,
+
+    paused: bool
 }
 
 impl SerialMonitorApp {
@@ -43,7 +45,8 @@ impl SerialMonitorApp {
                     reader: None,
                     parser: SerialParser::new(),
                     values: Vec::new(),
-                    lines: VecDeque::new()
+                    lines: VecDeque::new(),
+                    paused: false
                 };
                 Box::new(app)
             }),
@@ -70,13 +73,12 @@ impl SerialMonitorApp {
             while let Some(line) = reader.get_line() {
                 match &line {
                     Ok(line) => {
-                        match self.parser.parse_values(&line.content) {
-                            Ok(values) => self.handle_input(line.t, &values),
-                            Err(e) => self.error(&e.to_string())
-                        }
-                        self.lines.push_back(format!("[{:.2}] > {}", line.t, &line.content));
-                        if self.lines.len() > Self::STORED_LINES {
-                            self.lines.pop_front();
+                        if !self.paused {
+                            match self.parser.parse_values(&line.content) {
+                                Ok(values) => self.handle_input(line.t, &values),
+                                Err(e) => self.error(&e.to_string())
+                            }
+                            self.handle_input_line(line.t, &line.content);
                         }
                     },
                     Err(e) => self.error(&e.to_string())
@@ -92,6 +94,13 @@ impl SerialMonitorApp {
         }
         for (l, r) in zip(&mut self.values, values) {
             l.push([t, *r]);
+        }
+    }
+
+    fn handle_input_line(&mut self, t: f64, line: &String) {
+        self.lines.push_back(format!("[{:.2}] > {}", t, line));
+        if self.lines.len() > Self::STORED_LINES {
+            self.lines.pop_front();
         }
     }
 
@@ -180,6 +189,7 @@ impl SerialMonitorApp {
         reader.open(self.data.conn_config.dtr)?;
         reader.begin_read(StartMode::from(self.data.conn_config.clone()))?;
         self.reader = Some(reader);
+        self.paused = false;
         Ok(())
     }
 
@@ -220,6 +230,14 @@ impl SerialMonitorApp {
 
     pub fn has_console(&self) -> bool {
         self.data.plots.iter().any(|n| n.console)
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
+
+    pub fn set_paused(&mut self, pause: bool) {
+        self.paused = pause
     }
 }
 

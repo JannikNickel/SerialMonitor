@@ -213,9 +213,16 @@ impl SerialMonitorUI {
                 if ui.button("Add Plot").clicked() {
                     app.add_plot();
                 }
-                let add_console_btn = egui::Button::new("Add Console");
-                if ui.add_enabled(!app.has_console(), add_console_btn).clicked() {
+                let btn = egui::Button::new("Add Console");
+                if ui.add_enabled(!app.has_console(), btn).clicked() {
                     app.add_console();
+                }
+                let btn_text = match app.is_paused() {
+                    true => "Continue",
+                    false => "Pause"
+                };
+                if ui.button(btn_text).clicked() {
+                    app.set_paused(!app.is_paused());
                 }
                 if ui.button("Save Config").clicked() {}
                 if ui.button("Load Config").clicked() {}
