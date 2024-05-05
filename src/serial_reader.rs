@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug)]
 pub enum SerialError {
@@ -26,7 +27,7 @@ impl Display for SerialError {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Parity {
     None,
     Odd,
@@ -39,7 +40,7 @@ impl Display for Parity {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum FlowCtrl {
     None,
     Software,
@@ -52,7 +53,7 @@ impl Display for FlowCtrl {
     }
 }
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub enum StartMode {
     Immediate,
     Delay(Duration),

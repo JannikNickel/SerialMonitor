@@ -1,7 +1,8 @@
 use crate::serial_reader::{FlowCtrl, Parity, SerialConfig, StartMode};
 use std::{fmt::Display, sync::atomic::{AtomicUsize, Ordering}, time::Duration};
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ConnectionConfig {
     pub port: String,
     pub baud_rate: u32,
@@ -60,7 +61,7 @@ impl ConnectionConfig {
     pub const NO_PORT: &'static str = "-";
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum PlotMode {
     Continous,
     Cyclic
@@ -72,7 +73,7 @@ impl Display for PlotMode {
     }
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum PlotScaleMode {
     Auto,
     AutoMax,
@@ -85,6 +86,7 @@ impl Display for PlotScaleMode {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct PlotConfig {
     pub mode: PlotMode,
     pub window: f64,
@@ -105,14 +107,16 @@ impl Default for PlotConfig {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct InputSlot {
     pub index: usize,
     pub name: String,
     pub color: [f32; 3],
+    #[serde(skip)]
     pub value: f64
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct PlotData {
     pub id: usize,
     pub name: String,
@@ -143,9 +147,15 @@ impl PlotData {
             console: true
         }
     }
+
+    pub fn update_internal_ids(plots: &Vec<PlotData>) {
+        if let Some(max) = plots.iter().max_by_key(|n| n.id) {
+            PLOT_ID.store(max.id + 1, Ordering::SeqCst);
+        }
+    }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct SerialMonitorData {
     pub conn_config: ConnectionConfig,
     pub plot_config: PlotConfig,

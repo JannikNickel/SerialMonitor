@@ -3,7 +3,7 @@ use crate::data::{InputSlot, PlotConfig, PlotData, PlotMode, PlotScaleMode};
 use crate::serial_reader::{FlowCtrl, Parity, StartMode};
 use eframe::egui;
 use egui::emath::Numeric;
-use egui::{Align, Align2, Color32, Id, Layout, Ui};
+use egui::{Align, Align2, Color32, Context, Id, Layout, Ui};
 use egui_plot::{Corner, Legend, Line, PlotBounds, PlotMemory, PlotPoints, VLine};
 use egui::ecolor::linear_u8_from_linear_f32;
 use std::collections::hash_map::Entry;
@@ -34,18 +34,28 @@ const START_MODES: &[StartMode] = &[
 const PLOT_MODES: &[PlotMode] = &[PlotMode::Continous, PlotMode::Cyclic];
 const SCALE_MODES: &[PlotScaleMode] = &[PlotScaleMode::Auto, PlotScaleMode::AutoMax, PlotScaleMode::Manual];
 
+const INFO_COLOR: Color32 = Color32::from_rgb(25, 105, 19);
+const ERROR_COLOR: Color32 = Color32::from_rgb(105, 25, 19);
+
+pub enum NotificationType {
+    Info,
+    Error
+}
+
 pub struct Notification {
     pub start: Instant,
     pub duration: Duration,
-    pub text: String
+    pub text: String,
+    pub ntype: NotificationType
 }
 
 impl Notification {
-    pub fn new(text: &str, duration: Duration) -> Self {
+    pub fn new(text: &str, duration: Duration, ntype: NotificationType) -> Self {
         Self {
             start: Instant::now(),
             duration: duration,
-            text: text.to_owned()
+            text: text.to_owned(),
+            ntype: ntype
         }
     }
 }
@@ -59,21 +69,34 @@ enum PlotResponse {
 
 pub struct SerialMonitorUI {
     notification: Option<Notification>,
-    plot_ranges: HashMap<usize, [f64; 2]>
+    plot_ranges: HashMap<usize, [f64; 2]>,
+    ctx: Option<Context>
 }
 
 impl SerialMonitorUI {
     pub fn new(_context: &eframe::CreationContext<'_>) -> Self {
         Self {
             notification: None,
-            plot_ranges: HashMap::new()
+            plot_ranges: HashMap::new(),
+            ctx: None
         }
     }
 
     pub fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame, app: &mut SerialMonitorApp) {
+        self.ctx = Some(ctx.clone());
         self.config_panel(ctx, app);
         self.data_panel(ctx, app);
         self.notification(ctx);
+        self.ctx = None;
+    }
+
+    pub fn reset(&mut self) {
+        if let Some(ctx) = &self.ctx {
+            ctx.memory_mut(|mem| {
+                *mem = Default::default()
+            });
+        }
+        self.plot_ranges.clear();
     }
 
     pub fn set_notification(&mut self, notification: Notification) {
@@ -121,7 +144,11 @@ impl SerialMonitorUI {
                 if connect_resp.clicked() {
                     if !app.is_connected() {
                         if let Err(e) = app.connect_current() {
-                            self.set_notification(Notification::new(format!("Could not connect! ({})", e.to_string()).as_str(), Duration::from_secs(5)));
+                            self.set_notification(Notification::new(
+                                format!("Could not connect! ({})", e.to_string()).as_str(),
+                                Duration::from_secs(5),
+                                NotificationType::Error
+                            ));
                         }
                     } else {
                         app.disconnect_current();
@@ -192,13 +219,16 @@ impl SerialMonitorUI {
 
             if app.is_connected() && app.has_input() {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for slot in app.input_slots_mut() {
-                        ui.horizontal(|ui| {
-                            ui.color_edit_button_rgb(&mut slot.color);
-                            egui::TextEdit::singleline(&mut slot.name).desired_width(100.0).show(ui);
-                            ui.separator();
-                            ui.label(format!("{:.2}", slot.value));
-                        });
+                    let columns = app.input_columns();
+                    for (i, slot) in app.input_slots_mut().iter_mut().enumerate() {
+                        if i < columns {
+                            ui.horizontal(|ui| {
+                                ui.color_edit_button_rgb(&mut slot.color);
+                                egui::TextEdit::singleline(&mut slot.name).desired_width(100.0).show(ui);
+                                ui.separator();
+                                ui.label(format!("{:.2}", slot.value));
+                            });
+                        }
                     }
                 });
             } else {
@@ -224,8 +254,37 @@ impl SerialMonitorUI {
                 if ui.button(btn_text).clicked() {
                     app.set_paused(!app.is_paused());
                 }
-                if ui.button("Save Config").clicked() {}
-                if ui.button("Load Config").clicked() {}
+                if ui.button("Save Config").clicked() {
+                    match app.save_config_to_file() {
+                        Ok(path) => if path.is_some() {
+                            self.set_notification(Notification::new(
+                                &format!("Saved config ({})", path.unwrap()),
+                                Duration::from_secs(5),
+                                NotificationType::Info
+                            ))
+                        },
+                        Err(e) => self.set_notification(Notification::new(
+                            &format!("Could not save config ({})", e.to_string()),
+                            Duration::from_secs(5),
+                            NotificationType::Error
+                        ))
+                    }
+                }
+                if ui.button("Load Config").clicked() {
+                    match app.load_config_from_file(self) {
+                        Ok(true) => self.set_notification(Notification::new(
+                            &format!("Loaded config"),
+                            Duration::from_secs(5),
+                            NotificationType::Info
+                        )),
+                        Ok(false) => (),
+                        Err(e) => self.set_notification(Notification::new(
+                            &format!("Could not load config ({})", e.to_string()),
+                            Duration::from_secs(5),
+                            NotificationType::Error
+                        ))
+                    }
+                }
                 ui.add_space(ui.available_width());
             });
             ui.separator();
@@ -278,7 +337,11 @@ impl SerialMonitorUI {
                 return;
             }
 
-            let frame = egui::Frame::popup(&ctx.style()).fill(Color32::from_rgb(105, 25, 19));
+            let color = match notification.ntype {
+                NotificationType::Info => INFO_COLOR,
+                NotificationType::Error => ERROR_COLOR
+            };
+            let frame = egui::Frame::popup(&ctx.style()).fill(color);
             egui::Window::new("")
                 .fixed_pos([ctx.available_rect().center().x, 75.0])
                 .collapsible(false)
@@ -303,7 +366,7 @@ impl SerialMonitorUI {
         }
     
         let plt_id = format!("Plot_{}", plot.id);
-        let empty = input_slots.is_empty();
+        let empty = input_values.is_empty();
 
         let hidden = plot.hidden.iter().map(|n| match input_slots.get(*n) {
             Some(slot) => slot.name.clone(),
@@ -313,7 +376,7 @@ impl SerialMonitorUI {
         if !empty {
             legend = legend.hidden_items(hidden);
         }
-    
+
         egui_plot::Plot::new(&plt_id)
             .id(Id::new(&plt_id))
             .legend(legend)

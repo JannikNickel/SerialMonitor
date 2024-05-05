@@ -1,8 +1,10 @@
 use crate::data::{ConnectionConfig, InputSlot, PlotConfig, PlotData, SerialMonitorData};
 use crate::serial_parser::SerialParser;
 use crate::serial_reader::{SerialConfig, SerialError, SerialReader, StartMode};
-use crate::ui::{Notification, SerialMonitorUI};
+use crate::ui::{Notification, NotificationType, SerialMonitorUI};
 use std::collections::VecDeque;
+use std::fs::File;
+use std::io::Write;
 use std::iter::zip;
 use std::time::Duration;
 use egui::ecolor::rgb_from_hsv;
@@ -105,27 +107,27 @@ impl SerialMonitorApp {
     }
 
     fn prep_input_slots(&mut self, slots: usize) {
-        if self.data.inp_slots.len() < slots {
-            for i in self.data.inp_slots.len()..slots {
-                let col = rgb_from_hsv((i as f32 * 0.15 % 1.0, 0.8, 0.8));
-                let slot = InputSlot {
-                    index: i,
-                    name: format!("Slot {}", (i + 1)),
-                    color: col,
-                    value: 0.0
-                };
-                self.data.inp_slots.push(slot);
-            }
+        for i in self.data.inp_slots.len()..slots {
+            let col = rgb_from_hsv((i as f32 * 0.15 % 1.0, 0.8, 0.8));
+            let slot = InputSlot {
+                index: i,
+                name: format!("Slot {}", (i + 1)),
+                color: col,
+                value: 0.0
+            };
+            self.data.inp_slots.push(slot);
         }
 
         for (i, slot) in self.data.inp_slots.iter_mut().enumerate() {
-            slot.value = self.values[i].last().unwrap_or(&[0.0, 0.0])[1];
+            if i < self.values.len() {
+                slot.value = self.values[i].last().unwrap_or(&[0.0, 0.0])[1];
+            }
         }
     }
 
     fn error(&mut self, msg: &str) {
         if let Some(ui) = &mut self.ui {
-            ui.set_notification(Notification::new(msg, Duration::from_secs(5)));
+            ui.set_notification(Notification::new(msg, Duration::from_secs(5), NotificationType::Error));
         }
         self.disconnect_current();
     }
@@ -148,6 +150,10 @@ impl SerialMonitorApp {
 
     pub fn input_slots(&self) -> &Vec<InputSlot> {
         &self.data.inp_slots
+    }
+
+    pub fn input_columns(&self) -> usize {
+        self.parser.columns()
     }
 
     pub fn plots_mut(&mut self) -> &mut Vec<PlotData> {
@@ -197,8 +203,8 @@ impl SerialMonitorApp {
         if let Some(reader) = self.reader.take() {
             std::mem::drop(reader);
             self.parser.reset();
-            self.data.inp_slots.clear();
             self.values.clear();
+            self.paused = false;
         }
     }
 
@@ -238,6 +244,42 @@ impl SerialMonitorApp {
 
     pub fn set_paused(&mut self, pause: bool) {
         self.paused = pause
+    }
+
+    pub fn save_config_to_file(&self) -> std::io::Result<Option<String>> {
+        let file = rfd::FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .save_file();
+        if let Some(path) = file {
+            let config = serde_json::to_string_pretty(&self.data)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            let mut file = File::create(&path)?;
+            file.write_all(config.as_bytes())?;
+            return Ok(path.into_os_string().into_string().ok());
+        }
+        Ok(None)
+    }
+
+    pub fn load_config_from_file(&mut self, ui: &mut SerialMonitorUI) -> std::io::Result<bool> {
+        let file = rfd::FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .pick_file();
+        if let Some(path) = file {
+            let file = File::open(path)?;
+            let config: SerialMonitorData = serde_json::from_reader(&file)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+            self.load_config(config, ui);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub fn load_config(&mut self, config: SerialMonitorData, ui: &mut SerialMonitorUI) {
+        ui.reset();
+        self.disconnect_current();
+        self.data = config;
+        PlotData::update_internal_ids(&self.data.plots);
     }
 }
 
