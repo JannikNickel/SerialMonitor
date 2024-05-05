@@ -7,7 +7,7 @@ use egui::{Align, Align2, Color32, Id, Layout, Ui};
 use egui_plot::{Corner, Legend, Line, PlotBounds, PlotMemory, PlotPoints, VLine};
 use egui::ecolor::linear_u8_from_linear_f32;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Display;
 use std::iter::zip;
 use std::ops::RangeInclusive;
@@ -213,7 +213,10 @@ impl SerialMonitorUI {
                 if ui.button("Add Plot").clicked() {
                     app.add_plot();
                 }
-                if ui.button("Add Console").clicked() {}
+                let add_console_btn = egui::Button::new("Add Console");
+                if ui.add_enabled(!app.has_console(), add_console_btn).clicked() {
+                    app.add_console();
+                }
                 if ui.button("Save Config").clicked() {}
                 if ui.button("Load Config").clicked() {}
                 ui.add_space(ui.available_width());
@@ -233,7 +236,10 @@ impl SerialMonitorUI {
                         .min_height(128.0)
                         .resizable(true)
                         .show_inside(ui, |ui| {
-                            let (resp, hidden) = self.plot(ctx, ui, app.plot_config(), &app.plots()[i], app.input_slots(), app.raw_values());
+                            let (resp, hidden) = match app.plots()[i].console {
+                                true => (self.console(ctx, ui, &app.plots()[i], app.console_lines()), None),
+                                false => self.plot(ctx, ui, app.plot_config(), &app.plots()[i], app.input_slots(), app.raw_values())
+                            };
                             match resp {
                                 PlotResponse::Reset => {
                                     self.plot_ranges.remove(&app.plots()[i].id);
@@ -257,7 +263,7 @@ impl SerialMonitorUI {
             });
         });
     }
-
+    
     fn notification(&mut self, ctx: &egui::Context) {
         if let Some(notification) = &self.notification {
             if notification.start.elapsed() > notification.duration {
@@ -284,16 +290,7 @@ impl SerialMonitorUI {
     fn plot(&mut self, ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData, input_slots: &Vec<InputSlot>, input_values: &Vec<Vec<[f64; 2]>>) -> (PlotResponse, Option<Vec<usize>>) {
         ui.add_space(PLOT_MARGIN);
     
-        let mut result = PlotResponse::None;
-        ui.horizontal(|ui| {
-            ui.heading(&plot.name);
-            if ui.button("Reset").clicked() {
-                result = PlotResponse::Reset;
-            }
-            if ui.button("Delete").clicked() {
-                result = PlotResponse::Remove;
-            }
-        });
+        let result = self.plot_header(ui, plot);
         if result == PlotResponse::Remove {
             return (result, None);
         }
@@ -416,6 +413,49 @@ impl SerialMonitorUI {
             true => Some(hidden),
             false => None
         })
+    }
+
+    fn console(&mut self, _ctx: &egui::Context, ui: &mut Ui, plot: &PlotData, lines: &VecDeque<String>) -> PlotResponse {
+        ui.add_space(PLOT_MARGIN);
+    
+        let result = self.plot_header(ui, plot);
+        if result == PlotResponse::Remove {
+            return result;
+        }
+    
+        let plt_id = format!("Plot_{}", plot.id);    
+        egui::ScrollArea::vertical()
+            .id_source(plt_id)
+            .max_height(ui.available_height() - (PLOT_MARGIN + ui.style().spacing.item_spacing.y))
+            .auto_shrink([false, false])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                for line in lines.iter() {
+                    ui.label(line);
+                }
+            });
+
+        ui.add_space(PLOT_MARGIN);        
+        result
+    }
+
+    fn plot_header(&self, ui: &mut Ui, plot: &PlotData) -> PlotResponse {
+        let mut result = PlotResponse::None;
+        ui.horizontal(|ui| {
+            ui.heading(&plot.name);
+            let reset_btn_text = match plot.console {
+                true => "Clear",
+                false => "Reset"
+            };
+            if ui.button(reset_btn_text).clicked() {
+                result = PlotResponse::Reset;
+            }
+            if ui.button("Delete").clicked() {
+                result = PlotResponse::Remove;
+            }
+        });
+        result
     }
 }
 

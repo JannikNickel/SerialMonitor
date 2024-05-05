@@ -117,7 +117,8 @@ pub struct PlotData {
     pub id: usize,
     pub name: String,
     pub hidden: Vec<usize>,
-    pub height: f32
+    pub height: f32,
+    pub console: bool
 }
 
 static PLOT_ID: AtomicUsize = AtomicUsize::new(1);
@@ -128,7 +129,18 @@ impl PlotData {
             id: PLOT_ID.fetch_add(1, Ordering::SeqCst),
             name: name.to_owned(),
             hidden: Vec::new(),
-            height: 256.0
+            height: 256.0,
+            console: false
+        }
+    }
+
+    pub fn console() -> Self {
+        Self {
+            id: PLOT_ID.fetch_add(1, Ordering::SeqCst),
+            name: String::from("Console"),
+            hidden: Vec::new(),
+            height: 192.0,
+            console: true
         }
     }
 }

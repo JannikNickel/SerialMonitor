@@ -2,6 +2,7 @@ use crate::data::{ConnectionConfig, InputSlot, PlotConfig, PlotData, SerialMonit
 use crate::serial_parser::SerialParser;
 use crate::serial_reader::{SerialConfig, SerialError, SerialReader, StartMode};
 use crate::ui::{Notification, SerialMonitorUI};
+use std::collections::VecDeque;
 use std::iter::zip;
 use std::time::Duration;
 use egui::ecolor::rgb_from_hsv;
@@ -16,11 +17,13 @@ pub struct SerialMonitorApp {
     reader: Option<SerialReader>,
     parser: SerialParser,
 
-    values: Vec<Vec<[f64; 2]>>
+    values: Vec<Vec<[f64; 2]>>,
+    lines: VecDeque<String>
 }
 
 impl SerialMonitorApp {
     pub const STORED_DURATION: f64 = 60.0;
+    pub const STORED_LINES: usize = 512;
 
     pub fn run(data: SerialMonitorData) -> Result<(), String> {
         let native_opts = eframe::NativeOptions {
@@ -39,7 +42,8 @@ impl SerialMonitorApp {
                     ui: Some(ui),
                     reader: None,
                     parser: SerialParser::new(),
-                    values: vec![],
+                    values: Vec::new(),
+                    lines: VecDeque::new()
                 };
                 Box::new(app)
             }),
@@ -70,6 +74,10 @@ impl SerialMonitorApp {
                             Ok(values) => self.handle_input(line.t, &values),
                             Err(e) => self.error(&e.to_string())
                         }
+                        self.lines.push_back(format!("[{:.2}] > {}", line.t, &line.content));
+                        if self.lines.len() > Self::STORED_LINES {
+                            self.lines.pop_front();
+                        }
                     },
                     Err(e) => self.error(&e.to_string())
                 }
@@ -80,7 +88,7 @@ impl SerialMonitorApp {
 
     fn handle_input(&mut self, t: f64, values: &Vec<f64>) {
         while self.values.len() < values.len() {
-            self.values.push(vec![]);
+            self.values.push(Vec::new());
         }
         for (l, r) in zip(&mut self.values, values) {
             l.push([t, *r]);
@@ -145,10 +153,14 @@ impl SerialMonitorApp {
         &self.values
     }
 
+    pub fn console_lines(&self) -> &VecDeque<String> {
+        &self.lines
+    }
+
     pub fn available_devices(&self) -> Vec<String> {
         match serialport::available_ports() {
             Ok(ports) => ports.iter().map(|n| n.port_name.to_owned()).collect(),
-            Err(_) => vec![]
+            Err(_) => Vec::new()
         }
     }
 
@@ -185,7 +197,9 @@ impl SerialMonitorApp {
     }
 
     pub fn add_plot(&mut self) {
-        self.data.plots.push(PlotData::new(&format!("Plot {}", self.data.plots.len() + 1)));
+        let off = self.has_console() as usize;
+        let index = self.data.plots.len() - off;
+        self.data.plots.insert(index, PlotData::new(&format!("Plot {}", self.data.plots.len() + 1 - off)));
     }
 
     pub fn remove_plot(&mut self, index: usize) {
@@ -193,7 +207,19 @@ impl SerialMonitorApp {
     }
 
     pub fn reset_plot(&mut self, index: usize) {
-        self.data.plots[index].hidden.clear();
+        if self.data.plots[index].console {
+            self.lines.clear();
+        }
+    }
+
+    pub fn add_console(&mut self) {
+        if !self.has_console() {
+            self.data.plots.push(PlotData::console())
+        }
+    }
+
+    pub fn has_console(&self) -> bool {
+        self.data.plots.iter().any(|n| n.console)
     }
 }
 

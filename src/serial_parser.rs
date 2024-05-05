@@ -33,7 +33,7 @@ impl SerialParser {
 
     pub fn parse_values(&mut self, line: &str) -> Result<Vec<f64>, ParseError> {
         let mut columns = 0;
-        let mut res: Vec<f64> = vec![];
+        let mut res: Vec<f64> = Vec::new();
         for col in line.split(',') {
             if let Ok(v) = col.trim().parse::<f64>() {
                 columns += 1;
