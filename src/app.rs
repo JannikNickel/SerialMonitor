@@ -30,10 +30,17 @@ impl SerialMonitorApp {
     pub const STORED_LINES: usize = 512;
 
     pub fn run(data: SerialMonitorData) -> Result<(), String> {
+        let icon = image::load_from_memory(include_bytes!("../res/icon.ico")).unwrap();
+        let icon = egui::IconData {
+            width: icon.width(),
+            height: icon.height(),
+            rgba: icon.into_rgba8().into_raw()
+        };
         let native_opts = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size(egui::Vec2::new(WIN_WIDTH, WIN_HEIGHT))
-                .with_min_inner_size(egui::Vec2::new(WIN_WIDTH, WIN_HEIGHT)),
+                .with_min_inner_size(egui::Vec2::new(WIN_WIDTH, WIN_HEIGHT))
+                .with_icon(icon),
             ..Default::default()
         };
         eframe::run_native(
