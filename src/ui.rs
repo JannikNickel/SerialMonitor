@@ -227,9 +227,9 @@ impl SerialMonitorUI {
                 let mut i = 0;
                 while i < app.plots().len() {
                     let mut inc = 1;
-                    egui::TopBottomPanel::top(format!("PlotContainer_{}", app.plots()[i].id))
+                    let res = egui::TopBottomPanel::top(format!("PlotContainer_{}", app.plots()[i].id))
                         .frame(frame)
-                        .default_height(256.0)
+                        .default_height(app.plots()[i].height)
                         .min_height(128.0)
                         .resizable(true)
                         .show_inside(ui, |ui| {
@@ -248,6 +248,10 @@ impl SerialMonitorUI {
                                 }
                             }
                         });
+                    if inc != 0 {
+                        app.plots_mut()[i].height = res.response.rect.height();
+                    }
+                        
                     i += inc;
                 }
             });
