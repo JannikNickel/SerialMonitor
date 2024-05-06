@@ -304,7 +304,7 @@ impl SerialMonitorUI {
                         .show_inside(ui, |ui| {
                             let (resp, hidden) = match app.plots()[i].console {
                                 true => (self.console(ctx, ui, &app.plots()[i], app.console_lines()), None),
-                                false => self.plot(ctx, ui, app.plot_config(), &app.plots()[i], app.input_slots(), app.raw_values())
+                                false => self.plot(ctx, ui, app.plot_config(), &app.plots()[i], app.input_slots(), app.raw_values(), app.zoom_enabled())
                             };
                             match resp {
                                 PlotResponse::Reset => {
@@ -357,7 +357,7 @@ impl SerialMonitorUI {
         }
     }
 
-    fn plot(&mut self, ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData, input_slots: &Vec<InputSlot>, input_values: &Vec<Vec<[f64; 2]>>) -> (PlotResponse, Option<Vec<usize>>) {
+    fn plot(&mut self, ctx: &egui::Context, ui: &mut Ui, config: &PlotConfig, plot: &PlotData, input_slots: &Vec<InputSlot>, input_values: &Vec<Vec<[f64; 2]>>, zoom_enabled: bool) -> (PlotResponse, Option<Vec<usize>>) {
         ui.add_space(PLOT_MARGIN);
     
         let result = self.plot_header(ui, plot);
@@ -385,9 +385,9 @@ impl SerialMonitorUI {
             .y_axis_formatter(|grid_pt, _, _| format!("{:.2}", grid_pt.value))
             .y_axis_width(3)
             .allow_scroll(false)
-            .allow_zoom(false)
-            .allow_boxed_zoom(false)
-            .allow_drag(false)
+            .allow_zoom(zoom_enabled)
+            .allow_boxed_zoom(zoom_enabled)
+            .allow_drag(zoom_enabled)
             .allow_double_click_reset(false)
             .auto_bounds(egui::Vec2b::from([true, config.scale_mode != PlotScaleMode::Manual]))
             .show(ui, |ui| {
@@ -444,28 +444,30 @@ impl SerialMonitorUI {
                     }
                 }
 
-                let bounds_x: RangeInclusive<f64> = ui.plot_bounds().range_x();
-                match config.scale_mode {
-                    PlotScaleMode::Auto => {
-                        ui.set_auto_bounds(egui::Vec2b::from([true, true]));
-                    },
-                    PlotScaleMode::AutoMax => {
-                        let entry = match self.plot_ranges.entry(plot.id) {
-                            Entry::Occupied(o) => o.into_mut(),
-                            Entry::Vacant(v) => v.insert([min, max])
-                        };
-                        entry[0] = f64::min(entry[0], min);
-                        entry[1] = f64::max(entry[1], max);
-                        ui.set_plot_bounds(PlotBounds::from_min_max(
-                            [*bounds_x.start(), entry[0]], 
-                            [*bounds_x.end(), entry[1]]));
-                        ui.set_auto_bounds(egui::Vec2b::from([true, false]));
-                    },
-                    PlotScaleMode::Manual => {
-                        ui.set_plot_bounds(PlotBounds::from_min_max(
-                            [*bounds_x.start(), config.y_min], 
-                            [*bounds_x.end(), config.y_max]));
-                        ui.set_auto_bounds(egui::Vec2b::from([true, false]));
+                if !zoom_enabled {
+                    let bounds_x: RangeInclusive<f64> = ui.plot_bounds().range_x();
+                    match config.scale_mode {
+                        PlotScaleMode::Auto => {
+                            ui.set_auto_bounds(egui::Vec2b::from([true, true]));
+                        },
+                        PlotScaleMode::AutoMax => {
+                            let entry = match self.plot_ranges.entry(plot.id) {
+                                Entry::Occupied(o) => o.into_mut(),
+                                Entry::Vacant(v) => v.insert([min, max])
+                            };
+                            entry[0] = f64::min(entry[0], min);
+                            entry[1] = f64::max(entry[1], max);
+                            ui.set_plot_bounds(PlotBounds::from_min_max(
+                                [*bounds_x.start(), entry[0]], 
+                                [*bounds_x.end(), entry[1]]));
+                            ui.set_auto_bounds(egui::Vec2b::from([true, false]));
+                        },
+                        PlotScaleMode::Manual => {
+                            ui.set_plot_bounds(PlotBounds::from_min_max(
+                                [*bounds_x.start(), config.y_min], 
+                                [*bounds_x.end(), config.y_max]));
+                            ui.set_auto_bounds(egui::Vec2b::from([true, false]));
+                        }
                     }
                 }
             });

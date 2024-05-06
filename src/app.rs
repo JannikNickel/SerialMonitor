@@ -260,6 +260,10 @@ impl SerialMonitorApp {
         self.paused = pause
     }
 
+    pub fn zoom_enabled(&self) -> bool {
+        self.is_paused()
+    }
+
     pub fn save_config_to_file(&self) -> std::io::Result<Option<String>> {
         let file = rfd::FileDialog::new()
             .add_filter("JSON", &["json"])
