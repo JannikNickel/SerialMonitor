@@ -3,8 +3,6 @@ use crate::serial_parser::SerialParser;
 use crate::serial_reader::{SerialConfig, SerialError, SerialReader, StartMode};
 use crate::ui::{Notification, NotificationType, SerialMonitorUI};
 use std::collections::VecDeque;
-use std::fs::File;
-use std::io::Write;
 use std::iter::zip;
 use std::time::Duration;
 use egui::ecolor::rgb_from_hsv;
@@ -22,14 +20,15 @@ pub struct SerialMonitorApp {
     values: Vec<Vec<[f64; 2]>>,
     lines: VecDeque<String>,
 
-    paused: bool
+    paused: bool,
+    start_connected: bool
 }
 
 impl SerialMonitorApp {
     pub const STORED_DURATION: f64 = 60.0;
     pub const STORED_LINES: usize = 512;
 
-    pub fn run(data: SerialMonitorData) -> Result<(), String> {
+    pub fn run(data: SerialMonitorData, connect: bool) -> Result<(), String> {
         let icon = image::load_from_memory(include_bytes!("../res/icon.ico")).unwrap();
         let icon = egui::IconData {
             width: icon.width(),
@@ -46,7 +45,7 @@ impl SerialMonitorApp {
         eframe::run_native(
             "SerialMonitor",
             native_opts,
-            Box::new(|ctx| {
+            Box::new(move |ctx| {
                 let ui = SerialMonitorUI::new(ctx);
                 let app = SerialMonitorApp {
                     data,
@@ -55,7 +54,8 @@ impl SerialMonitorApp {
                     parser: SerialParser::new(),
                     values: Vec::new(),
                     lines: VecDeque::new(),
-                    paused: false
+                    paused: false,
+                    start_connected: connect
                 };
                 Box::new(app)
             }),
@@ -67,6 +67,13 @@ impl SerialMonitorApp {
         self.reset_port_if_missing();
         self.read_input();
         self.prep_input_slots(self.parser.columns());
+
+        if self.start_connected {
+            self.start_connected = false;
+            if let Err(e) = self.connect_current() {
+                self.error(&e.to_string());
+            }
+        }
     }
 
     pub fn reset_port_if_missing(&mut self) -> bool {
@@ -258,10 +265,7 @@ impl SerialMonitorApp {
             .add_filter("JSON", &["json"])
             .save_file();
         if let Some(path) = file {
-            let config = serde_json::to_string_pretty(&self.data)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-            let mut file = File::create(&path)?;
-            file.write_all(config.as_bytes())?;
+            SerialMonitorData::serialize(&path, &self.data)?;
             return Ok(path.into_os_string().into_string().ok());
         }
         Ok(None)
@@ -272,10 +276,7 @@ impl SerialMonitorApp {
             .add_filter("JSON", &["json"])
             .pick_file();
         if let Some(path) = file {
-            let file = File::open(path)?;
-            let config: SerialMonitorData = serde_json::from_reader(&file)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
+            let config = SerialMonitorData::deserialize(&path)?;
             self.load_config(config, ui);
             return Ok(true);
         }

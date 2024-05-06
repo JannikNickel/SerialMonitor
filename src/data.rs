@@ -1,5 +1,5 @@
 use crate::serial_reader::{FlowCtrl, Parity, SerialConfig, StartMode};
-use std::{fmt::Display, sync::atomic::{AtomicUsize, Ordering}, time::Duration};
+use std::{fmt::Display, fs::File, io::Write, path::PathBuf, sync::atomic::{AtomicUsize, Ordering}, time::Duration};
 use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -161,4 +161,21 @@ pub struct SerialMonitorData {
     pub plot_config: PlotConfig,
     pub inp_slots: Vec<InputSlot>,
     pub plots: Vec<PlotData>
+}
+
+impl SerialMonitorData {
+    pub fn serialize(path: &PathBuf, data: &SerialMonitorData) -> std::io::Result<()> {
+        let config = serde_json::to_string_pretty(data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let mut file = File::create(&path)?;
+        file.write_all(config.as_bytes())?;
+        Ok(())
+    }
+
+    pub fn deserialize(path: &PathBuf) -> Result<SerialMonitorData, std::io::Error> {
+        let file = File::open(path)?;
+        let config: SerialMonitorData = serde_json::from_reader(&file)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        Ok(config)
+    }
 }
