@@ -182,7 +182,14 @@ impl SerialReader {
                 started |= match start_mode {
                     StartMode::Immediate => true,
                     StartMode::Delay(delay) => t >= delay,
-                    StartMode::Message(ref msg) => line == msg,
+                    StartMode::Message(ref msg) => {
+                        let was_started = started;
+                        started |= line.ends_with(msg);
+                        if !was_started {
+                            continue;
+                        }
+                        started
+                    }
                 };
                 if !started {
                     continue;
