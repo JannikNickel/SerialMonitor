@@ -251,7 +251,8 @@ impl SerialMonitorUI {
                     true => "Continue",
                     false => "Pause"
                 };
-                if ui.button(btn_text).clicked() {
+                let btn = egui::Button::new(btn_text);
+                if ui.add_enabled(app.is_connected(), btn).clicked() {
                     app.set_paused(!app.is_paused());
                 }
                 if ui.button("Save Config").clicked() {
@@ -383,6 +384,7 @@ impl SerialMonitorUI {
             .height(ui.available_height() - (PLOT_MARGIN + ui.style().spacing.item_spacing.y))
             .x_axis_formatter(|grid_pt, _, _| format!("{:.2}s", grid_pt.value))
             .y_axis_formatter(|grid_pt, _, _| format!("{:.2}", grid_pt.value))
+            .label_formatter(|_, point| format!("t = {:.5}s\ny = {:.5}", point.x, point.y))
             .y_axis_width(3)
             .allow_scroll(false)
             .allow_zoom(zoom_enabled)

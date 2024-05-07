@@ -205,7 +205,9 @@ impl SerialMonitorApp {
     }
 
     pub fn connect_current(&mut self) -> Result<(), SerialError> {
-        let mut reader = SerialReader::new(SerialConfig::from(self.data.conn_config.clone()));
+        let mut config = SerialConfig::from(self.data.conn_config.clone());
+        config.timeout = Duration::from_millis(50);
+        let mut reader = SerialReader::new(config);
         reader.open(self.data.conn_config.dtr)?;
         reader.begin_read(StartMode::from(self.data.conn_config.clone()))?;
         self.reader = Some(reader);

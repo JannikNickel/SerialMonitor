@@ -1,7 +1,6 @@
-use serialport::{self, DataBits};
+use serialport::{self, DataBits, SerialPort};
 use std::collections::VecDeque;
 use std::fmt::Display;
-use std::io::{BufRead, BufReader};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -155,7 +154,7 @@ impl SerialReader {
             return Err(SerialError::AlreadyReading);
         }
 
-        let port = match self.port.take() {
+        let mut port = match self.port.take() {
             Some(p) => p,
             None => return Err(SerialError::PortNotOpen),
         };
@@ -163,7 +162,6 @@ impl SerialReader {
         let lines = Arc::clone(&self.lines);
         let stop = Arc::clone(&self.stop);
         let handle = thread::spawn(move || {
-            let mut reader = BufReader::new(port);
             let mut line_buf = String::new();
             let start_time = Instant::now();
             let start_off = match start_mode {
@@ -177,7 +175,7 @@ impl SerialReader {
                 }
 
                 line_buf.clear();
-                let res = reader.read_line(&mut line_buf);
+                let res = read_line(&mut port, &mut line_buf);
                 let line = line_buf.trim();
                 let t = start_time.elapsed();
 
@@ -202,7 +200,7 @@ impl SerialReader {
                     },
                     Err(e) => {
                         if let Ok(mut locked_lines) = lines.lock() {
-                            locked_lines.push_back(Err(SerialError::ReadError(e.to_string())));
+                            locked_lines.push_back(Err(SerialError::ReadError(e)));
                         }
                         break;
                     }
@@ -236,5 +234,25 @@ impl SerialReader {
 impl Drop for SerialReader {
     fn drop(&mut self) {
         self.stop_read();
+    }
+}
+
+fn read_line(port: &mut Box<dyn SerialPort>, buf: &mut String) -> Result<usize, String> {
+    let mut buffer = [b'\0'];
+    let mut nread = 0;
+    loop {
+        let read = port.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read != 1 {
+            return Err(String::from("Unexpected byte amount!"))
+        }
+        let c = match char::from_u32(buffer[0] as u32) {
+            Some(c) => c,
+            None => return Err(String::from("Byte is not a valid ASCII character!"))
+        };
+        if c == '\n' {
+            return Ok(nread);
+        }
+        nread += 1;
+        buf.push(c);
     }
 }

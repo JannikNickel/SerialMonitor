@@ -42,7 +42,7 @@ impl From<ConnectionConfig> for SerialConfig {
             parity: value.parity,
             stop_bits: value.stop_bits,
             flow_ctrl: value.flow_ctrl,
-            timeout: Duration::from_millis(1)
+            timeout: Duration::ZERO
         }
     }
 }
