@@ -11,10 +11,10 @@ use clap::Parser;
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[arg(long)]
+    #[arg(long, help = "Path to a json file containing a saved configuration")]
     config: Option<String>,
 
-    #[arg(short, long, action)]
+    #[arg(short, long, action, help = "Connect to the port from the configuration file")]
     connect: bool
 }
 
