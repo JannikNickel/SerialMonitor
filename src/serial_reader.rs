@@ -1,6 +1,7 @@
 use serialport::{self, DataBits, SerialPort};
 use std::collections::VecDeque;
 use std::fmt::Display;
+use std::io::ErrorKind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -73,6 +74,11 @@ impl Display for StartMode {
             }
         }
     }
+}
+
+enum ReadError {
+    Timeout,
+    Other(String)
 }
 
 pub struct Line {
@@ -206,10 +212,12 @@ impl SerialReader {
                         }
                     },
                     Err(e) => {
-                        if let Ok(mut locked_lines) = lines.lock() {
-                            locked_lines.push_back(Err(SerialError::ReadError(e)));
+                        if let ReadError::Other(e_str) = e {
+                            if let Ok(mut locked_lines) = lines.lock() {
+                                locked_lines.push_back(Err(SerialError::ReadError(e_str)));
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
             }
@@ -244,17 +252,20 @@ impl Drop for SerialReader {
     }
 }
 
-fn read_line(port: &mut Box<dyn SerialPort>, buf: &mut String) -> Result<usize, String> {
+fn read_line(port: &mut Box<dyn SerialPort>, buf: &mut String) -> Result<usize, ReadError> {
     let mut buffer = [b'\0'];
     let mut nread = 0;
     loop {
-        let read = port.read(&mut buffer).map_err(|e| e.to_string())?;
+        let read = port.read(&mut buffer).map_err(|e: std::io::Error| match e.kind() {
+            ErrorKind::TimedOut => ReadError::Timeout,
+            _ => ReadError::Other(e.to_string())
+        })?;
         if read != 1 {
-            return Err(String::from("Unexpected byte amount!"))
+            return Err(ReadError::Other(String::from("Unexpected byte amount!")))
         }
         let c = match char::from_u32(buffer[0] as u32) {
             Some(c) => c,
-            None => return Err(String::from("Byte is not a valid ASCII character!"))
+            None => return Err(ReadError::Other(String::from("Byte is not a valid ASCII character!")))
         };
         if c == '\n' {
             return Ok(nread);
