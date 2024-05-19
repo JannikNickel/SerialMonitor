@@ -85,6 +85,7 @@ impl SerialMonitorApp {
     }
 
     fn read_input(&mut self) {
+        let mut err: Option<String> = None;
         if let Some(mut reader) = self.reader.take() {
             while let Some(line) = reader.get_line() {
                 match &line {
@@ -92,15 +93,21 @@ impl SerialMonitorApp {
                         if !self.paused {
                             match self.parser.parse_values(&line.content) {
                                 Ok(values) => self.handle_input(line.t, &values),
-                                Err(e) => self.error(&e.to_string())
+                                Err(e) => self.warning(&e.to_string())
                             }
                             self.handle_input_line(line.t, &line.content);
                         }
                     },
-                    Err(e) => self.error(&e.to_string())
+                    Err(e) => {
+                        err = Some(e.to_string());
+                        break;
+                    }
                 }
             }
             self.reader = Some(reader);
+        }
+        if let Some(e) = err {
+            self.error(&e)
         }
     }
 
@@ -139,9 +146,15 @@ impl SerialMonitorApp {
         }
     }
 
+    fn warning(&mut self, msg: &str) {
+        if let Some(ui) = &mut self.ui {
+            ui.set_notification(Notification::new(msg, Duration::from_secs(5), NotificationType::Warning), true);
+        }
+    }
+
     fn error(&mut self, msg: &str) {
         if let Some(ui) = &mut self.ui {
-            ui.set_notification(Notification::new(msg, Duration::from_secs(5), NotificationType::Error));
+            ui.set_notification(Notification::new(msg, Duration::from_secs(5), NotificationType::Error), false);
         }
         self.disconnect_current();
     }

@@ -34,11 +34,13 @@ const START_MODES: &[StartMode] = &[
 const PLOT_MODES: &[PlotMode] = &[PlotMode::Continous, PlotMode::Cyclic];
 const SCALE_MODES: &[PlotScaleMode] = &[PlotScaleMode::Auto, PlotScaleMode::AutoMax, PlotScaleMode::Manual];
 
-const INFO_COLOR: Color32 = Color32::from_rgb(25, 105, 19);
-const ERROR_COLOR: Color32 = Color32::from_rgb(105, 25, 19);
+const INFO_COLOR: Color32 = Color32::from_rgb(118, 184, 31);
+const WARNING_COLOR: Color32 = Color32::from_rgb(184, 138, 31);
+const ERROR_COLOR: Color32 = Color32::from_rgb(184, 54, 31);
 
 pub enum NotificationType {
     Info,
+    Warning,
     Error
 }
 
@@ -69,6 +71,7 @@ enum PlotResponse {
 
 pub struct SerialMonitorUI {
     notification: Option<Notification>,
+    minor_notification: Option<Notification>,
     plot_ranges: HashMap<usize, [f64; 2]>,
     ctx: Option<Context>
 }
@@ -77,6 +80,7 @@ impl SerialMonitorUI {
     pub fn new(_context: &eframe::CreationContext<'_>) -> Self {
         Self {
             notification: None,
+            minor_notification: None,
             plot_ranges: HashMap::new(),
             ctx: None
         }
@@ -87,6 +91,7 @@ impl SerialMonitorUI {
         self.config_panel(ctx, app);
         self.data_panel(ctx, app);
         self.notification(ctx);
+        self.minor_notification(ctx);
         self.ctx = None;
     }
 
@@ -99,8 +104,11 @@ impl SerialMonitorUI {
         self.plot_ranges.clear();
     }
 
-    pub fn set_notification(&mut self, notification: Notification) {
-        self.notification = Some(notification);
+    pub fn set_notification(&mut self, notification: Notification, minor: bool) {
+        match minor {
+            true => self.minor_notification = Some(notification),
+            false => self.notification = Some(notification)
+        }
     }
 
     fn config_panel(&mut self, ctx: &egui::Context, app: &mut SerialMonitorApp) {
@@ -148,7 +156,7 @@ impl SerialMonitorUI {
                                 format!("Could not connect! ({})", e.to_string()).as_str(),
                                 Duration::from_secs(5),
                                 NotificationType::Error
-                            ));
+                            ), false);
                         }
                     } else {
                         app.disconnect_current();
@@ -227,6 +235,7 @@ impl SerialMonitorUI {
                                 egui::TextEdit::singleline(&mut slot.name).desired_width(100.0).show(ui);
                                 ui.separator();
                                 ui.label(format!("{:.2}", slot.value));
+                                ui.add_space(10.0);
                             });
                         }
                     }
@@ -262,13 +271,13 @@ impl SerialMonitorUI {
                                 &format!("Saved config ({})", path.unwrap()),
                                 Duration::from_secs(5),
                                 NotificationType::Info
-                            ))
+                            ), false)
                         },
                         Err(e) => self.set_notification(Notification::new(
                             &format!("Could not save config ({})", e.to_string()),
                             Duration::from_secs(5),
                             NotificationType::Error
-                        ))
+                        ), false)
                     }
                 }
                 if ui.button("Load Config").clicked() {
@@ -277,13 +286,13 @@ impl SerialMonitorUI {
                             &format!("Loaded config"),
                             Duration::from_secs(5),
                             NotificationType::Info
-                        )),
+                        ), false),
                         Ok(false) => (),
                         Err(e) => self.set_notification(Notification::new(
                             &format!("Could not load config ({})", e.to_string()),
                             Duration::from_secs(5),
                             NotificationType::Error
-                        ))
+                        ), false)
                     }
                 }
                 ui.add_space(ui.available_width());
@@ -337,24 +346,17 @@ impl SerialMonitorUI {
                 self.notification = None;
                 return;
             }
+            render_notification(ctx, notification, egui::Pos2::new(ctx.available_rect().center().x, 75.0), false);
+        }
+    }
 
-            let color = match notification.ntype {
-                NotificationType::Info => INFO_COLOR,
-                NotificationType::Error => ERROR_COLOR
-            };
-            let frame = egui::Frame::popup(&ctx.style()).fill(color);
-            egui::Window::new("")
-                .fixed_pos([ctx.available_rect().center().x, 75.0])
-                .collapsible(false)
-                .movable(false)
-                .resizable(false)
-                .frame(frame)
-                .title_bar(false)
-                .pivot(Align2::CENTER_CENTER)
-                .default_pos(egui::pos2(0.0, 0.0))
-                .show(ctx, |ui| {
-                    ui.heading(notification.text.as_str());
-                });
+    fn minor_notification(&mut self, ctx: &egui::Context) {
+        if let Some(notification) = &self.minor_notification {
+            if notification.start.elapsed() > notification.duration {
+                self.notification = None;
+                return;
+            }
+            render_notification(ctx, notification, ctx.available_rect().right_top(), true);
         }
     }
 
@@ -559,4 +561,30 @@ fn drag_value<T: Numeric>(ui: &mut egui::Ui, label: &'static str, value: &mut T,
                 .suffix(suffix));
         });
     });
+}
+
+fn render_notification(ctx: &egui::Context, notification: &Notification, pos: egui::Pos2, minor: bool) {
+    let color = match notification.ntype {
+        NotificationType::Info => INFO_COLOR,
+        NotificationType::Warning => WARNING_COLOR,
+        NotificationType::Error => ERROR_COLOR
+    };
+    let frame = egui::Frame::popup(&ctx.style()).fill(color);
+    egui::Window::new("")
+        .fixed_pos(pos)
+        .pivot(Align2::CENTER_CENTER)
+        .collapsible(false)
+        .movable(false)
+        .resizable(false)
+        .frame(frame)
+        .title_bar(false)
+        .default_pos(egui::pos2(0.0, 0.0))
+        .show(ctx, |ui| {
+            let text = egui::RichText::new(notification.text.as_str())
+                .color(egui::Color32::from_rgb(30, 30, 30));
+            match minor {
+                true => ui.label(text),
+                false => ui.heading(text)
+            }
+        });
 }
