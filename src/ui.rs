@@ -570,7 +570,7 @@ fn render_notification(ctx: &egui::Context, notification: &Notification, pos: eg
         NotificationType::Error => ERROR_COLOR
     };
     let frame = egui::Frame::popup(&ctx.style()).fill(color);
-    egui::Window::new("")
+    egui::Window::new(format!("Notification_{}", minor))
         .fixed_pos(pos)
         .pivot(Align2::CENTER_CENTER)
         .collapsible(false)

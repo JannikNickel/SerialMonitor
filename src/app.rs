@@ -3,6 +3,7 @@ use crate::serial_parser::SerialParser;
 use crate::serial_reader::{SerialConfig, SerialError, SerialReader, StartMode};
 use crate::ui::{Notification, NotificationType, SerialMonitorUI};
 use std::collections::VecDeque;
+use std::io::Write;
 use std::iter::zip;
 use std::time::Duration;
 use egui::ecolor::rgb_from_hsv;
@@ -21,14 +22,16 @@ pub struct SerialMonitorApp {
     lines: VecDeque<String>,
 
     paused: bool,
-    start_connected: bool
+    start_connected: bool,
+    terminal_output: bool,
+    headless: bool
 }
 
 impl SerialMonitorApp {
     pub const STORED_DURATION: f64 = 60.0;
     pub const STORED_LINES: usize = 512;
 
-    pub fn run(data: SerialMonitorData, connect: bool) -> Result<(), String> {
+    pub fn run(data: SerialMonitorData, connect: bool, terminal_output: bool, headless: bool) -> Result<(), String> {
         let icon = image::load_from_memory(include_bytes!("../res/icon.ico")).unwrap();
         let icon = egui::IconData {
             width: icon.width(),
@@ -42,21 +45,31 @@ impl SerialMonitorApp {
                 .with_icon(icon),
             ..Default::default()
         };
+        let mut app = SerialMonitorApp {
+            data,
+            ui: None,
+            reader: None,
+            parser: SerialParser::new(),
+            values: Vec::new(),
+            lines: VecDeque::new(),
+            paused: false,
+            start_connected: connect,
+            terminal_output: terminal_output,
+            headless: headless
+        };
+
+        if headless {
+            loop {
+                app.update();
+            }
+        }
+
         eframe::run_native(
             "SerialMonitor",
             native_opts,
             Box::new(move |ctx| {
                 let ui = SerialMonitorUI::new(ctx);
-                let app = SerialMonitorApp {
-                    data,
-                    ui: Some(ui),
-                    reader: None,
-                    parser: SerialParser::new(),
-                    values: Vec::new(),
-                    lines: VecDeque::new(),
-                    paused: false,
-                    start_connected: connect
-                };
+                app.ui = Some(ui);
                 Box::new(app)
             }),
         )
@@ -121,7 +134,12 @@ impl SerialMonitorApp {
     }
 
     fn handle_input_line(&mut self, t: f64, line: &String) {
-        self.lines.push_back(format!("[{:.2}] > {}", t, line));
+        let fmt_line = format!("[{:.2}] > {}", t, line);
+        if self.terminal_output {
+            println!("{}", &fmt_line);
+            _ = std::io::stdout().flush();
+        }
+        self.lines.push_back(fmt_line);
         if self.lines.len() > Self::STORED_LINES {
             self.lines.pop_front();
         }
@@ -155,6 +173,10 @@ impl SerialMonitorApp {
     fn error(&mut self, msg: &str) {
         if let Some(ui) = &mut self.ui {
             ui.set_notification(Notification::new(msg, Duration::from_secs(5), NotificationType::Error), false);
+        }
+        if self.headless {
+            eprintln!("{}", msg);
+            _ = std::io::stdout().flush();
         }
         self.disconnect_current();
     }

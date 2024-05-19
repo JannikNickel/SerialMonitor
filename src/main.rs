@@ -1,5 +1,3 @@
-#![windows_subsystem = "windows"]
-
 mod app;
 mod data;
 mod serial_reader;
@@ -17,7 +15,13 @@ struct Args {
     config: Option<String>,
 
     #[arg(short, long, action, help = "Connect to the port from the configuration file")]
-    connect: bool
+    connect: bool,
+
+    #[arg(short, long, action, help = "Enable output to the console/terminal")]
+    terminal: bool,
+
+    #[arg(long, action, help = "Prevent GUI creation", requires_all = &["config", "connect"])]
+    headless: bool
 }
 
 fn main() {
@@ -33,8 +37,21 @@ fn main() {
             }
         };
     }
-    if let Err(e) = SerialMonitorApp::run(data, args.config.is_some() && args.connect) {
+    if !args.terminal {
+        #[cfg(target_os = "windows")]
+        hide_console();
+    }
+
+    if let Err(e) = SerialMonitorApp::run(data, args.config.is_some() && args.connect, args.terminal, args.headless) {
         eprintln!("{:?}", e);
         std::process::exit(1);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn hide_console() {
+    use windows::Win32::System::Console::FreeConsole;
+    unsafe {
+        FreeConsole().ok();
     }
 }

@@ -13,12 +13,15 @@ All dependencies are available on github and crates.io:
 - [rfd](https://github.com/PolyMeilex/rfd) to create native file dialogs
 - [image](https://github.com/image-rs/image) to load the icon
 - [serde](https://github.com/serde-rs/json) to save/load configs as json
+- [windows](https://github.com/microsoft/windows-rs) for windows console ctrl
 
 ## Command line
 ```bash
-serial_monitor.exe --config "PATH TO CONFIG .JSON" --connect
+serial_monitor.exe --config "PATH_TO_CONFIG.JSON" [--connect] [--terminal] [--headless]
 --config <CONFIG>   # Path to a json file containing a saved configuration
 --connect [-c]      # Try to connect to the port from the configuration
+--terminal [-t]     # Enable output to the console/terminal
+--headless          # Prevent GUI creation. Requires --config and --connect
 ```
 
 ## Information
@@ -26,5 +29,6 @@ serial_monitor.exe --config "PATH TO CONFIG .JSON" --connect
 - Data sent by the serial device has to be in ASCII character format. The monitor reads data line by line to separate entries.
 - To send multiple values for each entry, values have to be separated by ','
 - Variable value counts for entries are not supported!
+- Lines that can not be parsed are still printed to the console/terminal
 - Plots are read only while data is being read. When paused, the graphs can be dragged with `LMB` and zoomed with `Ctrl` + `Mouse wheel`.
 - Pausing will not suspend data reading! Only displaying is paused and the read values are discarded. After continuing, there will be a gap in the displayed data.
